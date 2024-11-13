@@ -1,9 +1,3 @@
-########################################################
-# This is an example of the training and test procedure
-# You need to adjust the training and test dataloader based on your data
-# CopyRight @ Xuesong Niu
-########################################################
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
