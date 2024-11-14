@@ -23,8 +23,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from retinaface import RetinaFace   # Source code: https://github.com/serengil/retinaface
-from torch.utils.data._utils.collate import default_collate
-import torch.nn.functional as F
+
 
 import importlib
 def selective_importer(name, globals=None, locals=None, fromlist=(), level=0):
@@ -45,13 +44,6 @@ class BaseLoader(Dataset):
     The dataloader supports both providing data for pytorch training and common data-preprocessing methods,
     including reading files, resizing each frame, chunking, and video-signal synchronization.
     """
-    @staticmethod
-    def big_small_collate_fn(batch):
-        batch = default_collate(batch)
-        diff_pic, std_pic = batch[0][:, :3], batch[0][:, 3:]
-        resized_diff = F.interpolate(diff_pic, size=(9, 9), mode='bilinear', align_corners=False)
-        resized_std = F.interpolate(std_pic, size=(32, 32), mode='bilinear', align_corners=False)
-        return (resized_std, resized_diff), batch[1]
 
     @staticmethod
     def add_data_loader_args(parser):
@@ -86,8 +78,9 @@ class BaseLoader(Dataset):
         assert (config_data.END < 1 or config_data.END == 1)
         if config_data.DO_PREPROCESS:
             self.raw_data_dirs = self.get_raw_data(self.raw_data_path)
+            print(len(self.raw_data_dirs))
             self.preprocess_dataset(self.raw_data_dirs, config_data.PREPROCESS, config_data.BEGIN, config_data.END)
-            return 
+            exit(0)
         else:
             if not os.path.exists(self.cached_path):
                 print('CACHED_PATH:', self.cached_path)
@@ -106,27 +99,41 @@ class BaseLoader(Dataset):
 
     def __len__(self):
         """Returns the length of the dataset."""
-        return len(self.inputs)
+        shape_num = len(np.array(self.inputs).shape)
+        if shape_num == 2:
+            return len(self.inputs[0])
+        else:
+            return len(self.inputs)
 
     def __getitem__(self, index):
         """Returns a clip of video(3,T,W,H) and it's corresponding signals(T)."""
-        data = np.load(self.inputs[index])
-        label = np.load(self.labels[index])
-        # T, H, W, C
-        if self.data_format == 'NDCHW':
-            data = np.transpose(data, (0, 3, 1, 2))         # T, C, H, W
+        modality = 1
+        if isinstance(self.inputs, tuple):
+            rgb_data = np.load(self.inputs[0][index])
+            nir_data = np.load(self.inputs[1][index])
+            data = np.concatenate([rgb_data, nir_data], axis=-1)
+            label = np.load(self.labels[index])
+            modality += 1
+        else:
+            data = np.load(self.inputs[index])
+            label = np.load(self.labels[index])
+
+        if self.data_format == 'NDCHW': # CHUNK, C, H, W
+            data = np.transpose(data, (0, 3, 1, 2))
         elif self.data_format == 'NCDHW':
-            data = np.transpose(data, (3, 0, 1, 2))             # C, T, H, W
+            data = np.transpose(data, (3, 0, 1, 2))
         elif self.data_format == 'NDHWC':
             pass
         else:
             raise ValueError('Unsupported Data Format!')
-        # print(label)
         data = np.float32(data)
         label = np.float32(label)
         # item_path is the location of a specific clip in a preprocessing output folder
         # For example, an item path could be /home/data/PURE_SizeW72_...unsupervised/501_input0.npy
-        item_path = self.inputs[index]
+        if modality == 1:
+            item_path = self.inputs[index]
+        else:
+            item_path = self.inputs[0][index]
         # item_path_filename is simply the filename of the specific clip
         # For example, the preceding item_path's filename would be 501_input0.npy
         item_path_filename = item_path.split(os.sep)[-1]
@@ -137,7 +144,7 @@ class BaseLoader(Dataset):
         filename = item_path_filename[:split_idx]
         # chunk_id is the extracted, numeric chunk identifier. Following the previous comments, 
         # the chunk_id for example would be 0
-        chunk_id = item_path_filename[split_idx + 6:].split('.')[0]
+        chunk_id = item_path_filename[split_idx + 6:].split('.')[0] # xxx_inputxx.npy
         return data, label, filename, chunk_id
 
     def get_raw_data(self, raw_data_path):
@@ -229,19 +236,21 @@ class BaseLoader(Dataset):
         """
         data_dirs_split = self.split_raw_data(data_dirs, begin, end)  # partition dataset 
         # send data directories to be processed
+        
         file_list_dict = self.multi_process_manager(data_dirs_split, config_preprocess) 
         self.build_file_list(file_list_dict)  # build file list
         self.load_preprocessed_data()  # load all data and corresponding labels (sorted for consistency)
         print("Total Number of raw files preprocessed:", len(data_dirs_split), end='\n\n')
         
     
-    def preprocess(self, frames, bvps, config_preprocess):
+    def preprocess(self, frames, bvps, config_preprocess, img_index = None):
         """Preprocesses a pair of data.
 
         Args:
             frames(np.array): Frames in a video.
             bvps(np.array): Blood volumne pulse (PPG) signal labels for a video.
             config_preprocess(CfgNode): preprocessing settings(ref:config.py).
+            img_index(int): 0 is RGB, 1 is NIR
         Returns:
             frame_clips(np.array): processed video data by frames
             bvps_clips(np.array): processed bvp (ppg) labels by frames
@@ -262,9 +271,14 @@ class BaseLoader(Dataset):
             config_preprocess.ROI.EXTRACT_ROI,
             config_preprocess.ROI.LANDMARKS)
         
+        if img_index is None:
+            temp_DATA_TYPE = config_preprocess.DATA_TYPE
+        else:
+            temp_DATA_TYPE = config_preprocess.DATA_TYPE[img_index]
+        
         # Check data transformation type
         data = list()  # Video data
-        for data_type in config_preprocess.DATA_TYPE:
+        for data_type in temp_DATA_TYPE:
             f_c = frames.copy()
             if data_type == "Raw":
                 data.append(f_c / 255.0)
@@ -308,7 +322,7 @@ class BaseLoader(Dataset):
             # Use OpenCV's Haar Cascade algorithm implementation for face detection
             # This should only utilize the CPU
             detector = cv2.CascadeClassifier(
-            './dataset/haarcascade_frontalface_default.xml')
+            '/Users/code/python/Reasearch/rppgtoolbox/rPPG-Toolbox/dataset/haarcascade_frontalface_default.xml')
 
             # Computed face_zone(s) are in the form [x_coord, y_coord, width, height]
             # (x,y) corresponds to the top-left corner of the zone to define using
@@ -439,14 +453,14 @@ class BaseLoader(Dataset):
                 if results.multi_face_landmarks:
                     for face_landmarks in results.multi_face_landmarks:
                         if landmarks == []:
-                            landmarks = [list(range(len(face_landmarks.landmark)))]
+                            landmarks = list(range(len(face_landmarks.landmark)))
                         # Extract the coordinates for the landmarks of interest
                         for region_landmarks in landmarks:
                             roi_points = np.array([(int(face_landmarks.landmark[i].x * frame.shape[1]), int(face_landmarks.landmark[i].y * frame.shape[0])) for i in region_landmarks], np.int32)
                             conv_hull = cv2.convexHull(roi_points)
                             cv2.fillConvexPoly(mask, conv_hull, color=(255))
                         
-                        mask_3channel = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
+                        mask_3channel = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
                         frame = cv2.bitwise_and(frame, mask_3channel)
                 else:
                     print("No face detected in the frame. Appending the whole frame.")
@@ -498,7 +512,7 @@ class BaseLoader(Dataset):
             count += 1
         return count
 
-    def save_multi_process(self, frames_clips, bvps_clips, filename):
+    def save_multi_process(self, frames_clips, bvps_clips, filename, frame_type = None):
         """Save all the chunked data with multi-thread processing.
 
         Args:
@@ -509,15 +523,19 @@ class BaseLoader(Dataset):
             input_path_name_list: list of input path names
             label_path_name_list: list of label path names
         """
-        if not os.path.exists(self.cached_path):
-            os.makedirs(self.cached_path, exist_ok=True)
+        if frame_type is None:
+            cached_path = self.cached_path
+        else:
+            cached_path = self.cached_path + os.sep + str(frame_type)
+        if not os.path.exists(cached_path):
+            os.makedirs(cached_path, exist_ok=True)
         count = 0
         input_path_name_list = []
         label_path_name_list = []
         for i in range(len(bvps_clips)):
             assert (len(self.inputs) == len(self.labels))
-            input_path_name = self.cached_path + os.sep + "{0}_input{1}.npy".format(filename, str(count))
-            label_path_name = self.cached_path + os.sep + "{0}_label{1}.npy".format(filename, str(count))
+            input_path_name = cached_path + os.sep + "{0}_input{1}.npy".format(filename, str(count))
+            label_path_name = cached_path + os.sep + "{0}_label{1}.npy".format(filename, str(count))
             input_path_name_list.append(input_path_name)
             label_path_name_list.append(label_path_name)
             np.save(input_path_name, frames_clips[i])
@@ -537,6 +555,7 @@ class BaseLoader(Dataset):
         """
         print('Preprocessing dataset...')
         file_num = len(data_dirs)
+        print(data_dirs)
         choose_range = range(0, file_num)
         pbar = tqdm(list(choose_range))
 
@@ -581,17 +600,42 @@ class BaseLoader(Dataset):
         Returns:
             None (this function does save a file-list .csv file to self.file_list_path)
         """
-        file_list = []
-        # iterate through processes and add all processed file paths
-        for process_num, file_paths in file_list_dict.items():
-            file_list = file_list + file_paths
+        if type(self).__name__ == "MRNIRPLoader":
+            file_list = [[], []]
+            for process_num, file_paths in file_list_dict.items():
+                file_list[0] = file_list[0] + file_paths[0]
+                file_list[1] = file_list[1] + file_paths[1]
+        else:
+            file_list = []
+            # iterate through processes and add all processed file paths
+            for process_num, file_paths in file_list_dict.items():
+                file_list = file_list + file_paths
 
         if not file_list:
             raise ValueError(self.dataset_name, 'No files in file list')
-
-        file_list_df = pd.DataFrame(file_list, columns=['input_files'])
-        os.makedirs(os.path.dirname(self.file_list_path), exist_ok=True)
-        file_list_df.to_csv(self.file_list_path)  # save file list to .csv
+        
+        print(np.array(file_list).shape)
+        print(file_list)
+        if len(np.array(file_list).shape)== 1: # one modality
+            file_list_df = pd.DataFrame(file_list, columns=['input_files'])
+            os.makedirs(os.path.dirname(self.file_list_path), exist_ok=True)
+            file_list_df.to_csv(self.file_list_path)  # save file list to .csv
+        else: # two modality, one is RGN, the other is NIR
+            # rgb_col = [item for _ in file_list[0::2] for item in _]
+            # nir_col = [item for _ in file_list[1::2] for item in _]
+            # file_list_dict = {
+            #     'input_files_rgb' : rgb_col,
+            #     'input_files_nir' : nir_col
+            # }
+            file_list_dict = {
+                'input_files_rgb' : file_list[0],
+                'input_files_nir' : file_list[1]
+            }
+            file_list_df = pd.DataFrame(file_list_dict)
+            os.makedirs(os.path.dirname(self.file_list_path), exist_ok=True)
+            file_list_df.to_csv(self.file_list_path)  # save file list to .csv
+            
+            
 
     def build_file_list_retroactive(self, data_dirs, begin, end):
         """ If a file list has not already been generated for a specific data split build a list of files 
@@ -605,7 +649,7 @@ class BaseLoader(Dataset):
         Returns:
             None (this function does save a file-list .csv file to self.file_list_path)
         """
-
+        
         # get data split based on begin and end indices.
         data_dirs_subset = self.split_raw_data(data_dirs, begin, end)
 
@@ -616,18 +660,39 @@ class BaseLoader(Dataset):
         filename_list = list(set(filename_list))  # ensure all indexes are unique
 
         # generate a list of all preprocessed / chunked data files
-        file_list = []
-        for fname in filename_list:
-            processed_file_data = list(glob.glob(self.cached_path + os.sep + "{0}_input*.npy".format(fname)))
-            file_list += processed_file_data
+        if type(self).__name__ == "MRNIRPLoader":
+            rgb_file_list = []
+            for fname in filename_list:
+                cached_path = self.cached_path + os.sep + 'RGB'
+                processed_file_data = list(glob.glob(cached_path + os.sep + "{0}_input*.npy".format(fname)))
+                rgb_file_list += processed_file_data
 
-        if not file_list:
-            raise ValueError(self.dataset_name,
-                             'File list empty. Check preprocessed data folder exists and is not empty.')
+            if not rgb_file_list:
+                raise ValueError(self.dataset_name,
+                                'File list empty. Check preprocessed data folder exists and is not empty.')
+            
+            nir_file_list = [path.replace('RGB', 'NIR') for path in rgb_file_list]
+            
+            file_list_dict = {
+                'input_files_rgb' : rgb_file_list,
+                'input_files_nir' : nir_file_list
+            }
+            file_list_df = pd.DataFrame(file_list_dict)
+            os.makedirs(os.path.dirname(self.file_list_path), exist_ok=True)
+            file_list_df.to_csv(self.file_list_path)  # save file list to .csv
+        else:            
+            file_list = []
+            for fname in filename_list:
+                processed_file_data = list(glob.glob(self.cached_path + os.sep + "{0}_input*.npy".format(fname)))
+                file_list += processed_file_data
 
-        file_list_df = pd.DataFrame(file_list, columns=['input_files'])
-        os.makedirs(os.path.dirname(self.file_list_path), exist_ok=True)
-        file_list_df.to_csv(self.file_list_path)  # save file list to .csv
+            if not file_list:
+                raise ValueError(self.dataset_name,
+                                'File list empty. Check preprocessed data folder exists and is not empty.')
+
+            file_list_df = pd.DataFrame(file_list, columns=['input_files'])
+            os.makedirs(os.path.dirname(self.file_list_path), exist_ok=True)
+            file_list_df.to_csv(self.file_list_path)  # save file list to .csv
 
     def load_preprocessed_data(self):
         """ Loads the preprocessed data listed in the file list.

@@ -16,9 +16,8 @@ from scipy.io import loadmat
 from dataset.data_loader.BaseLoader import BaseLoader
 
 import pandas as pd
-import torchvision.transforms as transforms
-import torch
-from PIL import Image
+
+from concurrent.futures import ThreadPoolExecutor
 
 class MRNIRPLoader(BaseLoader):
     """The data loader for the MR-NIRP Processed dataset."""
@@ -28,104 +27,32 @@ class MRNIRPLoader(BaseLoader):
                 data_path(str): path of a folder which stores raw video and bvp data.
                 e.g. data_path should be "RawData" for below dataset structure:
                 -----------------
-                    RawData/
-                    |   |-- subject1/
-                    |       |-- subject1_driving_large_motion_975
-                    |          |-- NIR.zip
-                    |          |-- RGB.zip
-                    |          |-- PulseOX.zip
-                    |       |-- subject1_driving_small_motion_975
-                    |          |...
-                    |       |-- subject1_driving_small_motion_940
-                    |          |...
-                    |       |-- subject1_driving_still_940
-                    |          |...
-                    |       |-- subject1_driving_still_975
-                    |          |...
-                    |       |-- subject1_garage_large_motion_975
-                    |          |...
-                    |       |-- subject1_garage_large_motion_940
-                    |          |...
-                    |       |-- subject1_garage_small_motion_975
-                    |          |...
-                    |       |-- subject1_garage_small_motion_940
-                    |          |...
-                    |       |-- subject1_garage_still_974
-                    |          |...
-                    |       |-- subject1_garage_still_940
-                    |          |...
-                    |...
-                    |   |-- subjectn/
-                    |       |...
+                     RawData/
+                     |   |-- subject1/
+                     |       |-- NIR.zip
+                     |       |-- RGB.zip
+                     |       |-- PulseOX.zip
+                     |   |-- subject2/
+                     |       |-- NIR.zip
+                     |       |-- RGB.zip
+                     |       |-- PulseOX.zip
+                     |...
+                     |   |-- subjectn/
+                     |       |-- NIR.zip
+                     |       |-- RGB.zip
+                     |       |-- PulseOX.zip
                 -----------------
                 name(string): name of the dataloader.
                 config_data(CfgNode): data settings(ref:config.py).
         """
         self.filtering = config_data.FILTERING
-        self.stmap = True
-        self.transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-        ])
         super().__init__(name, data_path, config_data)
-        
-    def __getitem__(self, index):
-        """Returns a clip of video(3,T,W,H) and it's corresponding signals(T)."""
-        data = np.load(self.inputs[index])
-        base_name = os.path.basename(self.inputs[index])
-        if self.stmap:
-            nir_path = os.path.join('/data/PreprocessedData/CHROM_POS/NIR_SMALL', base_name).replace('npy', 'png')
-            nir_data = cv2.imread(nir_path)
-            for c in range(nir_data.shape[2]):
-                for r in range(nir_data.shape[0]):
-                    nir_data[r, :, c] = 255 * ((nir_data[r, :, c] - np.min(nir_data[r, :, c])) \
-                            / (0.00001 + np.max(nir_data[r, :,c]) - np.min(nir_data[r, :, c])))
-            nir_data = Image.fromarray(np.uint8(nir_data))
-            # nir_data = nir_data.transpose(1, 2, 0).reshape(900, 3, 24, 24).astype(np.float32) # 576, 900, 3 -> 900, 3, 576
-            nir_data = self.transform(nir_data).permute(2, 0, 1).reshape(900, 3, 24, 24) # 3, 576, 900 -> 900, 3, 24, 24
-        else:
-            nir_path = os.path.join('/data/PreprocessedData/MR-NIRP_DiffNormalized_DiffNormalized_NIR', base_name)
-            nir_data = np.load(nir_path)
-        label = np.load(self.labels[index])
-        # T, H, W, C
-        if self.data_format == 'NDCHW':
-            data = np.transpose(data, (0, 3, 1, 2))         # T, C, H, W
-            if not self.stmap:
-                nir_data = np.transpose(nir_data, (0, 3, 1, 2))         # T, C, H, W
-        elif self.data_format == 'NCDHW':
-            data = np.transpose(data, (3, 0, 1, 2))             # C, T, H, W
-            if not self.stmap:
-                nir_data = np.transpose(nir_data, (3, 0, 1, 2))             # C, T, H, W
-        elif self.data_format == 'NDHWC':
-            pass
-        else:
-            raise ValueError('Unsupported Data Format!')
-        # print(label)
-        data = np.float32(data)
-        nir_data = np.float32(nir_data)
-        # print(nir_data.shape)
-        label = np.float32(label)
-        # item_path is the location of a specific clip in a preprocessing output folder
-        # For example, an item path could be /home/data/PURE_SizeW72_...unsupervised/501_input0.npy
-        item_path = self.inputs[index]
-        # item_path_filename is simply the filename of the specific clip
-        # For example, the preceding item_path's filename would be 501_input0.npy
-        item_path_filename = item_path.split(os.sep)[-1]
-        # split_idx represents the point in the previous filename where we want to split the string 
-        # in order to retrieve a more precise filename (e.g., 501) preceding the chunk (e.g., input0)
-        split_idx = item_path_filename.rindex('_')
-        # Following the previous comments, the filename for example would be 501
-        filename = item_path_filename[:split_idx]
-        # chunk_id is the extracted, numeric chunk identifier. Following the previous comments, 
-        # the chunk_id for example would be 0
-        chunk_id = item_path_filename[split_idx + 6:].split('.')[0]
-        return data, nir_data, label, filename, chunk_id
+
 
     def get_raw_data(self, data_path):
         """Returns data directories under the path(For MR-NIRP dataset)."""
-        data_dirs = glob.glob(data_path + os.sep + "Subject*" + os.sep + "subject*")
-
+        data_dirs = glob.glob(data_path + os.sep + "Subject*" + os.sep + "*subject*")
+        # print(data_dirs)
         if not data_dirs:
             raise ValueError("dataset data paths empty!")
         dirs = [{"index": os.path.basename(data_dir), "path": data_dir} for data_dir in data_dirs]
@@ -152,24 +79,26 @@ class MRNIRPLoader(BaseLoader):
         """
         file_list_path = self.file_list_path  # get list of files in
         file_list_df = pd.read_csv(file_list_path)
-        base_inputs = file_list_df['input_files'].tolist()
+        base_inputs = file_list_df['input_files_rgb'].tolist()
         filtered_inputs = []
-
+        # print(base_inputs)
         for input in base_inputs:
             input_name = input.split(os.sep)[-1].split('.')[0].rsplit('_', 1)[0]
             subject_name = input_name.rsplit('_')[0]
             task = input_name.rsplit('_', 1)[0].split('_', 1)[1]
-            subject_task = input_name.rsplit('_', 1)[0]
+            # print(input_name)
 
             if self.filtering.SELECT_TASKS:
-                if input_name not in self.filtering.TASK_LIST and subject_name not in self.filtering.TASK_LIST and task not in self.filtering.TASK_LIST and subject_task not in self.filtering.TASK_LIST:
+                if input_name not in self.filtering.TASK_LIST and subject_name not in self.filtering.TASK_LIST and task not in self.filtering.TASK_LIST:
+                    print(f"TASK {input_name}")
                     continue
                 
             if self.filtering.USE_EXCLUSION_LIST:
-                if input_name in self.filtering.EXCLUSION_LIST or subject_name in self.filtering.EXCLUSION_LIST or task in self.filtering.EXCLUSION_LIST or subject_task in self.filtering.EXCLUSION_LIST:
+                if input_name in self.filtering.EXCLUSION_LIST or subject_name in self.filtering.EXCLUSION_LIST or task in self.filtering.EXCLUSION_LIST:
+                    print(f"FILTER {input_name}")
                     continue
 
-            # print(input_name)
+
             filtered_inputs.append(input)
 
         if not filtered_inputs:
@@ -177,7 +106,8 @@ class MRNIRPLoader(BaseLoader):
         
         filtered_inputs = sorted(filtered_inputs)  # sort input file name list
         labels = [input_file.replace("input", "label") for input_file in filtered_inputs]
-        self.inputs = filtered_inputs
+        nir_filtered_inputs = [input_file.replace("RGB", "NIR") for input_file in filtered_inputs]
+        self.inputs = (filtered_inputs, nir_filtered_inputs)
         self.labels = labels
         self.preprocessed_data_len = len(filtered_inputs)
 
@@ -231,7 +161,7 @@ class MRNIRPLoader(BaseLoader):
     
     
     @staticmethod
-    def read_video_unzipped(video_file):
+    def read_video_unzipped(video_file, img_type = 'NIR'):
         frames = list()
         all_pgm = sorted(glob.glob(os.path.join(video_file, "Frame*.pgm")))
         for pgm_path in all_pgm:
@@ -243,7 +173,9 @@ class MRNIRPLoader(BaseLoader):
                 continue
             
             frame = (frame >> 8).astype(np.uint8)                       # convert from uint16 to uint8
-
+            if img_type == 'NIR':
+                if np.mean(frame) < 10: # black imgs
+                    continue
             frames.append(frame)
             
         return np.asarray(frames, dtype=np.uint8)
@@ -259,9 +191,9 @@ class MRNIRPLoader(BaseLoader):
         
         return ppg, timestamps
     
+    
     @staticmethod
     def correct_irregular_sampling(ppg, timestamps, target_fs=30):
-        """Resampling functionality borrowed from: https://github.com/ToyotaResearchInstitute/RemotePPG"""
         resampled_ppg = []
         for curr_time in np.arange(0.0, timestamps[-1], 1.0/target_fs):
             time_diff = timestamps - curr_time
@@ -278,11 +210,13 @@ class MRNIRPLoader(BaseLoader):
     
     
     @staticmethod
-    def match_length(ppg, frames):
-        target_length = min(ppg.shape[0], frames.shape[0])
+    def match_length(ppg, frame1, frame2):
+        target_length = min(ppg.shape[0], frame1.shape[0])
+        target_length = min(target_length, frame2.shape[0])
         ppg = ppg[:target_length]
-        frames = frames[:target_length]
-        return ppg, frames
+        frame1 = frame1[:target_length]
+        frame2 = frame2[: target_length]
+        return ppg, frame1, frame2
     
     
     # def preprocess_dataset(self, data_dirs, config_preprocess, begin=0, end=1):
@@ -291,17 +225,18 @@ class MRNIRPLoader(BaseLoader):
                 
     #     for i in tqdm(range(file_num)):
     #         # Skip the subject2_garage_small_motion_940 corrupted video
-    #         if data_dirs[i]['index'] == "subject2_garage_small_motion_940":
+    #         if data_dirs[i]['index'] == "subject2_garage_small_motion_940" or 'large_motion' in data_dirs[i]['index']:
     #             continue
             
     #         # Read Video Frames
     #         # frames = self.read_video(os.path.join(data_dirs[i]['path'], "RGB.zip"))
-    #         frames = self.read_video_unzipped(os.path.join(data_dirs[i]['path'], "RGB"))
+    #         frames = self.read_video_unzipped(os.path.join(data_dirs[i]['path'], "NIR"))
+    #         print(len(frames))
 
     #         if self.config_data.PREPROCESS.USE_PSUEDO_PPG_LABEL:
     #             bvps = self.generate_pos_psuedo_labels(frames, fs=self.config_data.FS)
     #         else: 
-    #             # bvps = self.read_wave(os.path.join(data_dirs[i]['path'], "PulseOx.zip"))
+    #             # bvps, timestamps = self.read_wave(os.path.join(data_dirs[i]['path'], "PulseOx.zip"))
     #             bvps, timestamps = self.read_wave_unzipped(os.path.join(data_dirs[i]['path'], "PulseOX"))
                         
     #         bvps = self.correct_irregular_sampling(bvps, timestamps, target_fs=self.config_data.FS)
@@ -316,24 +251,34 @@ class MRNIRPLoader(BaseLoader):
 
     def preprocess_dataset_subprocess(self, data_dirs, config_preprocess, i, file_list_dict):
         """ invoked by preprocess_dataset for multi_process."""        
-        # Skip corrupted frames
+        # Read Video Frames
         if data_dirs[i]['index'] == "subject2_garage_small_motion_940":
             return
+        execute = ThreadPoolExecutor(max_workers=2)
+        future_list = []
+        future = execute.submit(self.read_video_unzipped, os.path.join(data_dirs[i]['path'], "RGB"))
+        future_list.append(future)
+        future = execute.submit(self.read_video_unzipped, os.path.join(data_dirs[i]['path'], "NIR"))
+        future_list.append(future)
+        rgb_frames, nir_frames = future_list[0].result(), future_list[1].result()
         # frames = self.read_video(os.path.join(data_dirs[i]['path'], "RGB.zip"))
-        frames = self.read_video_unzipped(os.path.join(data_dirs[i]['path'], "RGB"))
+        # nir_frames = self.read_video(os.path.join(data_dirs[i]['path'], "NIR.zip"))
+        print(f"rgb: {len(rgb_frames)}\n nir: {len(nir_frames)}\n")
 
         if self.config_data.PREPROCESS.USE_PSUEDO_PPG_LABEL:
-            bvps = self.generate_pos_psuedo_labels(frames, fs=self.config_data.FS)
+            bvps = self.generate_pos_psuedo_labels(rgb_frames, fs=self.config_data.FS)
         else: 
-            # bvps = self.read_wave(os.path.join(data_dirs[i]['path'], "PulseOx.zip"))
+            # bvps, timestamps = self.read_wave(os.path.join(data_dirs[i]['path'], "PulseOx.zip"))
             bvps, timestamps = self.read_wave_unzipped(os.path.join(data_dirs[i]['path'], "PulseOX"))
                     
         bvps = self.correct_irregular_sampling(bvps, timestamps, target_fs=self.config_data.FS)
-        bvps, frames = self.match_length(bvps, frames)
+        bvps, rgb_frames, nir_frames = self.match_length(bvps, rgb_frames, nir_frames)
                     
         # target_length = frames.shape[0]
         # bvps = BaseLoader.resample_ppg(bvps, target_length)
 
-        frames_clips, bvps_clips = self.preprocess(frames, bvps, config_preprocess)
-        input_name_list, _ = self.save_multi_process(frames_clips, bvps_clips, data_dirs[i]['index'])
-        file_list_dict[i] = input_name_list
+        rgb_frames_clips, bvps_clips = self.preprocess(rgb_frames, bvps, config_preprocess, img_index=0) # preprocess single file
+        nir_frames_clips, bvps_clips = self.preprocess(nir_frames, bvps, config_preprocess, img_index=1)
+        rgb_input_name_list, _ = self.save_multi_process(rgb_frames_clips, bvps_clips, data_dirs[i]['index'], 'RGB')
+        nir_input_name_list, _ = self.save_multi_process(nir_frames_clips, bvps_clips, data_dirs[i]['index'], 'NIR')
+        file_list_dict[i] = [rgb_input_name_list, nir_input_name_list]
