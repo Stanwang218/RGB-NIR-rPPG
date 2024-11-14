@@ -11,6 +11,7 @@ from sig_util import *
 import cv2 as cv
 from torch.utils.data._utils.collate import default_collate
 import glob
+from pure_dataset import MSTmap_PURE_cut
   
 class MSTmap_UBFC_cut(Dataset):
     @staticmethod
@@ -27,7 +28,6 @@ class MSTmap_UBFC_cut(Dataset):
         
         train_bvp_list, test_bvp_list, valid_bvp_list = [], [], []
         
-        # bvp_path = '/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/data/PreprocessedData/raw/label'
         print(dataset_path)
         bvp_list = csv_file['project_name'].tolist()
         

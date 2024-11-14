@@ -1,5 +1,5 @@
 dataset:
-  path: /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/data/PreprocessedData/MR-NIRP_final_raw/RGB
+  path: /data/PreprocessedData/MR-NIRP_final_raw/RGB
   train_subject: ['subject1', 'subject9', 'subject10', 'subject11', 'subject13', 'subject14', 'subject15', 'subject16', 'subject17', 'subject18', 'subject19']
   valid_subject: ['subject2', 'subject3', 'subject4']
   test_subject: ['subject5', 'subject6', 'subject7', 'subject8']
