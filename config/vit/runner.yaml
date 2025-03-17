@@ -1,7 +1,7 @@
 root: /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp
-device: 'cudaL:0'
+device: 'cuda:0'
 task: "train"
-name: "fold_5"
+name: "fold_1"
 patience: 10
 batch_size: 64
 epochs: 20

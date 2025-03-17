@@ -32,6 +32,7 @@ import random
 import scipy
 from tqdm import tqdm
 from utils.model.models_vit import vit_base_patch16
+from utils.model.models_mae import mae_vit_base_patch16_dec512d8b
 import matplotlib.pyplot as plt
 
 def _next_power_of_2(x):
@@ -271,7 +272,7 @@ def train_vit(runner_config, model, train_loader, val_loader):
 
     device = runner_config['device']
     
-    optimizer = torch.optim.Adam([{'params': model.parameters(), 'lr': learning_rate}])
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(0.9, 0.95), weight_decay = 0.05)
     
     model.to(device)
     
@@ -279,7 +280,7 @@ def train_vit(runner_config, model, train_loader, val_loader):
     
     train_loss_list, val_loss_list = [], []
     
-    min_val_loss = torch.inf
+    min_val_loss = torch.finfo(torch.float32).max
     for epoch in tqdm(range(epoch_num)):
         temp_tr_loss, temp_val_loss = 0, 0
         for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(train_loader)):
@@ -301,8 +302,8 @@ def train_vit(runner_config, model, train_loader, val_loader):
         if min_val_loss > temp_val_loss:
             min_val_loss = temp_val_loss
             cur_patience = 0
-            model_ckpt = net.state_dict()
-            print(f"best loss {min_val_loss}")
+            model_ckpt = model.state_dict()
+            print(f"best loss {min_val_loss / len(val_loader)}")
             if not os.path.exists(runner_config['model_saved_path']):
                 os.mkdir(runner_config['model_saved_path'])
             torch.save(model_ckpt, f"{runner_config['model_saved_path']}/ckpt.pth")
@@ -317,7 +318,7 @@ def train_vit(runner_config, model, train_loader, val_loader):
     plt.plot(train_loss_list, label='train')
     plt.plot(val_loss_list, label = 'val')
     plt.legend()
-    plt.savefig(runner_config['log'])
+    plt.savefig(f"{runner_config['log']}/loss.png")
 
 def test_vit(runner_config, model:nn.Module, test_loader):
     ckpt_path = f"{runner_config['model_saved_path']}/ckpt.pth"
@@ -339,7 +340,73 @@ def test_vit(runner_config, model:nn.Module, test_loader):
     hr_pred = [compute_metric_per_clip(_bvp) for _bvp in pred_bvp_list]
     
     MyEval(hr_pred, bpm_list)
+
+
+def train_mae(runner_config, model, train_loader, val_loader):
+    epoch_num = runner_config['epochs']
+    learning_rate = runner_config['lr']
+    patience, cur_patience  = runner_config['patience'], 0
+
+    device = runner_config['device']
     
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(0.9, 0.95), weight_decay = 0.05)
+    
+    model.to(device)
+    
+    train_loss_list, val_loss_list = [], []
+    
+    min_val_loss = torch.finfo(torch.float32).max
+    for epoch in tqdm(range(epoch_num)):
+        temp_tr_loss, temp_val_loss = 0, 0
+        for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(train_loader)):
+            data = data.to(device)
+            loss, bvp_map, mask = model(data)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            temp_tr_loss += loss.item()
+        train_loss_list.append(temp_tr_loss / len(train_loader))
+        for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(val_loader)):
+            data = data.to(device)
+            loss, bvp_map, mask = model(data)
+            temp_val_loss += loss.item()
+        if min_val_loss > temp_val_loss:
+            min_val_loss = temp_val_loss
+            cur_patience = 0
+            model_ckpt = model.state_dict()
+            print(f"best loss {min_val_loss}")
+            if not os.path.exists(runner_config['model_saved_path']):
+                os.mkdir(runner_config['model_saved_path'])
+            torch.save(model_ckpt, f"{runner_config['model_saved_path']}/ckpt.pth")
+        else:
+            cur_patience += 1
+            
+        val_loss_list.append(temp_val_loss / len(val_loader))
+        if cur_patience >= patience:
+            print("no more patience, stop training")
+            break
+    
+    plt.plot(train_loss_list, label='train')
+    plt.plot(val_loss_list, label = 'val')
+    plt.legend()
+    plt.savefig(runner_config['log'])
+    
+def test_mae(runner_config, model:nn.Module, test_loader):
+    ckpt_path = f"{runner_config['model_saved_path']}/ckpt.pth"
+    device = runner_config['device']
+    model = model.to(device)
+    model.load_state_dict(torch.load(ckpt_path))
+    bvp_map_list = []
+    with torch.no_grad():
+        for (batch_idx, (data, bvp, bpm, name)) in tqdm(enumerate(test_loader)):
+            data = data.to(device)
+            loss, bvp_map, mask = model(data)
+            bvp_map_list.append(bvp_map.cpu().numpy())
+            break
+    bvp_map_list = np.vstack(bvp_map_list)
+    np.save(f"{runner_config['model_saved_path']}/example.npy")
+            
+
 
 if __name__ == '__main__':
     args = get_parser()
@@ -350,13 +417,12 @@ if __name__ == '__main__':
 
     dataset_config['selected_topic'] = args.selected_topics
     print(dataset_config['selected_topic'])
-    saved_dir = os.path.join(runner_config['root'], runner_config['name'])
-    
-    if runner_config['task'] == 'train':
-        if not os.path.exists(saved_dir):
-            os.mkdir(saved_dir)
-        runner_config['model_saved_path'] = os.path.join(saved_dir, 'ckpt')
-        runner_config['log'] = saved_dir
+    saved_dir = os.path.join(runner_config['root'], runner_config['name'] + "_" + model_config['name'])
+
+    if not os.path.exists(saved_dir):
+        os.mkdir(saved_dir)
+    runner_config['model_saved_path'] = os.path.join(saved_dir, 'ckpt')
+    runner_config['log'] = saved_dir
         
     task = runner_config['task']
     task_name = runner_config['name']
@@ -371,7 +437,10 @@ if __name__ == '__main__':
         model = vit_base_patch16(in_chans = 3, num_classes = 224)
         train_vit(runner_config, model, train_loader, valid_loader)
         test_vit(runner_config, model, test_loader)
-
+    elif model_config['name'] == 'mae':
+        model = mae_vit_base_patch16_dec512d8b(in_chans=3, decoder_embed_dim=128, decoder_depth=8)
+        train_mae(runner_config, model, train_loader, valid_loader)
+        test_vit(runner_config, model, test_loader)
     else:
         exit()
 
