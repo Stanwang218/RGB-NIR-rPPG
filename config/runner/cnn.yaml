@@ -1,0 +1,10 @@
+runner:
+  task: "train"
+  name: "ViT" # name of setting
+  batch_size: 64
+  epochs: 20
+  warm_epochs: 5
+  lr: 0.001
+  device: "cuda:0"
+  weight_decay: 0.05
+  layer_decay: 0.75

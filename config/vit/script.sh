@@ -1,0 +1,1 @@
+python ./test.py --dataset ./config/dataset/fold1.yaml --model ./config/vit/model.yaml --runner ./config/vit/runner.yaml

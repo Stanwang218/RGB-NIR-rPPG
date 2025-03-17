@@ -12,7 +12,7 @@ import scipy.io as sio
 import torchvision.models as models
 from torch.optim.lr_scheduler import MultiStepLR
 
-sys.path.append('..');
+sys.path.append('..')
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils.model.model_disentangle import HR_disentangle_cross;
@@ -22,13 +22,17 @@ from utils.loss.loss_SNR import SNR_loss;
 from tqdm import tqdm
 import argparse
 import yaml
-from mrnirp_dataset import MSTmap_dataset_cut
-from utils.dataset.pure_dataset import MSTmap_PURE_cut
+from utils.dataset.mrnirp_dataset import MSTmap_dataset_cut
+# from utils.dataset.pure_dataset import MSTmap_PURE_cut
+from utils.dataset.sig_util import compute_metric_per_clip
 import numpy as np
 from datetime import datetime
 import matplotlib.pyplot as plt
 import random
 import scipy
+from tqdm import tqdm
+from utils.model.models_vit import vit_base_patch16
+import matplotlib.pyplot as plt
 
 def _next_power_of_2(x):
     """Calculate the nearest power of 2."""
@@ -86,7 +90,6 @@ def _calculate_SNR(pred_ppg_signal, hr_label, fs=30, low_pass=0.75, high_pass=2.
         
     return SNR
 
-
 def set_seed(seed):
     if seed != 0:
         random.seed(seed)
@@ -101,7 +104,9 @@ def set_seed(seed):
 
 def get_parser():
     parser = argparse.ArgumentParser('MAE fine-tuning for image classification', add_help=False)
-    parser.add_argument("--config_file", required=False, default='/mae_rppg/train/fold1.yaml')
+    parser.add_argument("--dataset", required=False, default='/mae_rppg/train/fold1.yaml')
+    parser.add_argument("--runner", required=False, default='/mae_rppg/train/fold1.yaml')
+    parser.add_argument("--model", required=False, default='/mae_rppg/train/fold1.yaml')
     parser.add_argument("--seed", type=int, default=7234)
     parser.add_argument("--selected_topics", nargs = '+', type=str, default=[])
     return parser
@@ -126,101 +131,24 @@ def MyEval(HR_pr, HR_rel):
           )
     return me, std, mae, rmse, mer, p
 
-
-args = get_parser()
-args = args.parse_args()
-set_seed(args.seed)
-f = open(args.config_file)
-config = yaml.safe_load(f)
-dataset_config, model_config, runner_config = config['dataset'], config['model'], config['runner']
-dataset_config['selected_topic'] = args.selected_topics
-print(dataset_config['selected_topic'])
-saved_dir = os.path.join(runner_config['root'], datetime.now().strftime("%Y-%m-%d-%H:%M"))
-if runner_config['task'] == 'train':
-    if not os.path.exists(saved_dir):
-        os.mkdir(saved_dir)
-    runner_config['model_saved_path'] = os.path.join(saved_dir, 'ckpt')
-    runner_config['log'] = saved_dir
-    
-task = runner_config['task']
-task_name = runner_config['name']
-
-train_dataset, test_dataset, valid_dataset = MSTmap_dataset_cut.split_dataset(config=dataset_config)
-
-
-train_loader = DataLoader(dataset=train_dataset, 
-                                batch_size=runner_config['batch_size'],
-                                )
-
-test_loader = DataLoader(dataset=test_dataset, 
-                                batch_size=runner_config['batch_size'],
-                                )
-
-valid_loader = DataLoader(dataset=test_dataset, 
-                                batch_size=runner_config['batch_size'],
-                                )
-
-epoch_num = 70;
-learning_rate = 0.0005;
-
-
-#######################################################
-lambda_hr = 1; # correct
-lambda_img = 50; # 50
-lambda_ecg = 20; # 2
-lambda_snr = 10; # correct
-lambda_cross_fhr = 10; # 10
-lambda_cross_fn = 10; # 10
-lambda_cross_hr = 1; # correct
-# old, 1,50,20,10
-# new, 1, 5, 10, 1
-
-print(f"lambda hr: {lambda_hr}, lambda img: {lambda_img}, lambda ecg: {lambda_ecg}, lambda snr: {lambda_snr}, lr: {learning_rate}")
-
-video_length = 224;
-net = HR_disentangle_cross(video_length, num_channel=model_config['channels']);
-if model_config['pretrained_path'] is not None:
-    ckpt_path = model_config['pretrained_path']
-    net.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
-    print(f"successfully load ckpt from {ckpt_path}")
-    
-net.cuda();
-#########################################################################
-
-lossfunc_HR = nn.L1Loss();
-# lossfunc_HR = nn.MSELoss()
-lossfunc_img = nn.L1Loss();
-lossfunc_cross = Cross_loss(lambda_cross_fhr = lambda_cross_fhr, lambda_cross_fn = lambda_cross_fn, lambda_cross_hr = lambda_cross_hr);
-lossfunc_ecg = Neg_Pearson(downsample_mode = 0);
-lossfunc_SNR = SNR_loss(clip_length = video_length, loss_type = 7);
-
-optimizer = torch.optim.Adam([{'params': net.parameters(), 'lr': learning_rate}]);
-scheduler = MultiStepLR(optimizer, milestones=[15,25], gamma=0.5)
-min_val_loss = 90000
-
-train_loss_list, val_loss_list = [], []
-
-patience = 10
-
-cur_patience = 0
-
-def train():
+def train(net, model_name = 'vit'):
     global min_val_loss
     global cur_patience
-    net.train();
-    train_loss = 0;
+    net.train()
+    train_loss = 0
     fps = torch.tensor([30])
+    
     for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(train_loader)):
 
-        data = Variable(data);
-        bvp = Variable(bvp);
-        bpm = Variable(bpm.view(-1,1));
-        fps = Variable(fps.view(-1,1));
-        data, bpm = data.cuda(), bpm.cuda();
+        data = Variable(data)
+        bvp = Variable(bvp)
+        bpm = Variable(bpm.view(-1,1))
+        fps = Variable(fps.view(-1,1))
+        data, bpm = data.cuda(), bpm.cuda()
         fps = fps.cuda()
         bvp = bvp.cuda()
 
-        feat_hr, feat_n, output, img_out, feat_hrf1, feat_nf1, hrf1, idx1, feat_hrf2, feat_nf2, hrf2, idx2, ecg, ecg1, ecg2 = net(data);
+        feat_hr, feat_n, output, img_out, feat_hrf1, feat_nf1, hrf1, idx1, feat_hrf2, feat_nf2, hrf2, idx2, ecg, ecg1, ecg2 = net(data)
 
         loss_hr = lossfunc_HR(output, bpm)*lambda_hr; # predicted heart rate against ground truth
         loss_img = lossfunc_img(data, img_out)*lambda_img; # reconstruction loss
@@ -232,10 +160,10 @@ def train():
         loss = loss_hr + loss_ecg + loss_img + loss_SNR;
 
         loss_cross, loss_hr1, loss_hr2, loss_fhr1, loss_fhr2, loss_fn1, loss_fn2, loss_hr_dis1, loss_hr_dis2 = lossfunc_cross(feat_hr, feat_n, output,
-                                                                                                                              feat_hrf1, feat_nf1,
-                                                                                                                              hrf1, idx1,
-                                                                                                                              feat_hrf2, feat_nf2,
-                                                                                                                              hrf2, idx2, bpm)
+                                                                                                                            feat_hrf1, feat_nf1,
+                                                                                                                            hrf1, idx1,
+                                                                                                                            feat_hrf2, feat_nf2,
+                                                                                                                            hrf2, idx2, bpm)
         
         # print(output.view(-1))
         loss = loss + loss_cross;
@@ -247,7 +175,7 @@ def train():
         optimizer.step();
 
         print('Train epoch: {:.0f}, it: {:.0f}, loss: {:.4f}, loss_hr: {:.4f}, loss_img: {:.4f}, loss_cross: {:.4f}, loss_snr: {:.4f}, loss_ecg: {:.4f}'.format(epoch, batch_idx,
-                                                                                       loss, loss_hr, loss_img, loss_cross, loss_SNR, loss_ecg));
+                                                                                    loss, loss_hr, loss_img, loss_cross, loss_SNR, loss_ecg));
     # valid
     val_loss = 0
     with torch.no_grad():
@@ -292,8 +220,6 @@ def train():
     val_loss_list.append(val_loss)
     cur_patience += 1
         
-        
-
 def test():
     net.eval()
     test_loss = 0;
@@ -338,26 +264,171 @@ def test():
     print('Throughput:', len(test_dataset) * 224 / total_time, 'FPS')
 
 
-begin_epoch = 1;
+def train_vit(runner_config, model, train_loader, val_loader):
+    epoch_num = runner_config['epochs']
+    learning_rate = runner_config['lr']
+    patience, cur_patience  = runner_config['patience'], 0
 
-if task == 'train':
-    for epoch in range(begin_epoch, epoch_num + 1):
-        train();
-        test();
-        scheduler.step()
+    device = runner_config['device']
+    
+    optimizer = torch.optim.Adam([{'params': model.parameters(), 'lr': learning_rate}])
+    
+    model.to(device)
+    
+    lossfunc_ecg = Neg_Pearson(downsample_mode = 0)
+    
+    train_loss_list, val_loss_list = [], []
+    
+    min_val_loss = torch.inf
+    for epoch in tqdm(range(epoch_num)):
+        temp_tr_loss, temp_val_loss = 0, 0
+        for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(train_loader)):
+            data = data.to(device)
+            bvp = bvp.to(device)
+            pred = model(data)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            loss = lossfunc_ecg(bvp, pred)
+            temp_tr_loss += loss.item()
+        train_loss_list.append(temp_tr_loss / len(train_loader))
+        for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(val_loader)):
+            data = data.to(device)
+            bvp = bvp.to(device)
+            pred = model(data)
+            loss = lossfunc_ecg(bvp, pred)
+            temp_val_loss += loss.item()
+        if min_val_loss > temp_val_loss:
+            min_val_loss = temp_val_loss
+            cur_patience = 0
+            model_ckpt = net.state_dict()
+            print(f"best loss {min_val_loss}")
+            if not os.path.exists(runner_config['model_saved_path']):
+                os.mkdir(runner_config['model_saved_path'])
+            torch.save(model_ckpt, f"{runner_config['model_saved_path']}/ckpt.pth")
+        else:
+            cur_patience += 1
+            
+        val_loss_list.append(temp_val_loss / len(val_loader))
         if cur_patience >= patience:
             print("no more patience, stop training")
             break
-
-    plt.plot([i + 1 for i in range(len(train_loss_list))], train_loss_list, label='Train')
-    plt.plot([i + 1 for i in range(len(val_loss_list))], val_loss_list, label='Val')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
+    
+    plt.plot(train_loss_list, label='train')
+    plt.plot(val_loss_list, label = 'val')
     plt.legend()
-    if not os.path.exists(runner_config['log']):
-        os.mkdir(runner_config['log'])
-    plt.savefig(f"{runner_config['log']}/loss_{task_name}.png")
+    plt.savefig(runner_config['log'])
 
-else:
-    print("start testing")
-    test()
+def test_vit(runner_config, model:nn.Module, test_loader):
+    ckpt_path = f"{runner_config['model_saved_path']}/ckpt.pth"
+    device = runner_config['device']
+    model = model.to(device)
+    model.load_state_dict(torch.load(ckpt_path))
+    pred_bvp_list = []
+    bpm_list = []
+    with torch.no_grad():
+        for (batch_idx, (data, bvp, bpm, name)) in tqdm(enumerate(test_loader)):
+            data = data.to(device)
+            pred_bvp = model(data).cpu() # bz, 224 
+            bpm_list.append(bpm)
+            pred_bvp_list.append(bvp)
+    
+    pred_bvp_list = np.vstack(pred_bvp_list)
+    # extract heart rate from bvp
+    
+    hr_pred = [compute_metric_per_clip(_bvp) for _bvp in pred_bvp_list]
+    
+    MyEval(hr_pred, bpm_list)
+    
+
+if __name__ == '__main__':
+    args = get_parser()
+    args = args.parse_args()
+    set_seed(args.seed)
+    f_dataset, f_runner, f_model = open(args.dataset), open(args.runner), open(args.model)
+    dataset_config, model_config, runner_config = yaml.safe_load(f_dataset), yaml.safe_load(f_model), yaml.safe_load(f_runner)
+
+    dataset_config['selected_topic'] = args.selected_topics
+    print(dataset_config['selected_topic'])
+    saved_dir = os.path.join(runner_config['root'], runner_config['name'])
+    
+    if runner_config['task'] == 'train':
+        if not os.path.exists(saved_dir):
+            os.mkdir(saved_dir)
+        runner_config['model_saved_path'] = os.path.join(saved_dir, 'ckpt')
+        runner_config['log'] = saved_dir
+        
+    task = runner_config['task']
+    task_name = runner_config['name']
+
+    train_dataset, test_dataset, valid_dataset = MSTmap_dataset_cut.split_dataset(config=dataset_config)
+
+    train_loader = DataLoader(dataset=train_dataset, batch_size=runner_config['batch_size'],)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=runner_config['batch_size'],)
+    valid_loader = DataLoader(dataset=test_dataset, batch_size=runner_config['batch_size'],)
+    
+    if model_config['name'] == 'vit':
+        model = vit_base_patch16(in_chans = 3, num_classes = 224)
+        train_vit(runner_config, model, train_loader, valid_loader)
+        test_vit(runner_config, model, test_loader)
+
+    else:
+        exit()
+
+    # lambda_hr = 1; # correct
+    # lambda_img = 50; # 50
+    # lambda_ecg = 20; # 2
+    # lambda_snr = 10; # correct
+    # lambda_cross_fhr = 10; # 10
+    # lambda_cross_fn = 10; # 10
+    # lambda_cross_hr = 1; # correct
+    # # old, 1,50,20,10
+    # # new, 1, 5, 10, 1
+
+    # print(f"lambda hr: {lambda_hr}, lambda img: {lambda_img}, lambda ecg: {lambda_ecg}, lambda snr: {lambda_snr}, lr: {learning_rate}")
+
+    # video_length = 224;
+    # net = HR_disentangle_cross(video_length, num_channel=model_config['channels']);
+    # if model_config['pretrained_path'] is not None:
+    #     ckpt_path = model_config['pretrained_path']
+    #     net.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
+    #     print(f"successfully load ckpt from {ckpt_path}")
+        
+    # net.cuda();
+    # #########################################################################
+
+    # lossfunc_HR = nn.L1Loss();
+    # # lossfunc_HR = nn.MSELoss()
+    # lossfunc_img = nn.L1Loss();
+    # lossfunc_cross = Cross_loss(lambda_cross_fhr = lambda_cross_fhr, lambda_cross_fn = lambda_cross_fn, lambda_cross_hr = lambda_cross_hr);
+    # lossfunc_ecg = Neg_Pearson(downsample_mode = 0)
+    # lossfunc_SNR = SNR_loss(clip_length = video_length, loss_type = 7);
+
+    # scheduler = MultiStepLR(optimizer, milestones=[15,25], gamma=0.5)
+    # min_val_loss = 90000
+
+    # train_loss_list, val_loss_list = [], []
+
+    # begin_epoch = 1;
+
+    # if task == 'train':
+    #     for epoch in range(begin_epoch, epoch_num + 1):
+    #         train();
+    #         test();
+    #         scheduler.step()
+    #         if cur_patience >= patience:
+    #             print("no more patience, stop training")
+    #             break
+
+    #     plt.plot([i + 1 for i in range(len(train_loss_list))], train_loss_list, label='Train')
+    #     plt.plot([i + 1 for i in range(len(val_loss_list))], val_loss_list, label='Val')
+    #     plt.xlabel('Epoch')
+    #     plt.ylabel('Loss')
+    #     plt.legend()
+    #     if not os.path.exists(runner_config['log']):
+    #         os.mkdir(runner_config['log'])
+    #     plt.savefig(f"{runner_config['log']}/loss_{task_name}.png")
+
+    # else:
+    #     print("start testing")
+    #     test()

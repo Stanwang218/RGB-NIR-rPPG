@@ -7,7 +7,7 @@ import numpy as np
 import ast
 import torch
 import torchvision.transforms as transforms
-from sig_util import *
+from utils.dataset.sig_util import *
 import cv2 as cv
 from torch.utils.data._utils.collate import default_collate
 import glob
@@ -250,8 +250,8 @@ class MSTmap_dataset_cut(Dataset):
         exclude_list = config['exclude_list']
         map_type = config['map_type']
         selected_topics = config['selected_topic']
-        # dataset_path = config['path'] # label path
-        dataset_path = '/data/PreprocessedData/MSTMap_new'
+        dataset_path = config['path'] # label path
+        # dataset_path = '/data/PreprocessedData/MSTMap_new'
         csv_file = pd.read_csv(os.path.join(dataset_path, 'old_data.csv'))
         
         train_bvp_list, test_bvp_list, valid_bvp_list = [], [], []
