@@ -1,0 +1,1 @@
+python ./test.py --dataset ./config/dataset/fold1.yaml --model ./config/mae/model.yaml --runner ./config/mae/runner.yaml
