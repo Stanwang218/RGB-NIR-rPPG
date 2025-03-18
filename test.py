@@ -372,8 +372,11 @@ def test_vit(runner_config, model:nn.Module, test_loader):
     
     pred_bvp_list = np.vstack(pred_bvp_list)
     # extract heart rate from bvp
-    
+    bpm_list = [int(_hr + 0.5) for _hr in bpm_list]
     hr_pred = [compute_metric_per_clip(pred_bvp_list[i, :]) for i in range(pred_bvp_list.shape[0])]
+    print(hr_pred)
+    print(bpm_list)
+    MyEval(hr_pred, bpm_list)
 
 
 def train_mae(runner_config, model, train_loader, val_loader):
