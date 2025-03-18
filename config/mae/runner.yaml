@@ -2,11 +2,11 @@ root: /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp
 device: 'cuda:0'
 task: "train"
 name: "fold_1"
-patience: 20
-batch_size: 64
-epochs: 400
+patience: 50
+batch_size: 128
+epochs: 2000
 warm_epochs: 5
-lr: 0.001
+lr: 1e-4
 device: "cuda:0"
 weight_decay: 0.05
 layer_decay: 0.75

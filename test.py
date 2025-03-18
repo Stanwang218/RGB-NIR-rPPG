@@ -288,7 +288,7 @@ def test():
     print('Throughput:', len(test_dataset) * 224 / total_time, 'FPS')
 
 
-def train_vit(runner_config, model, train_loader, val_loader, task):
+def train_vit(runner_config, model, train_loader, val_loader, task = 'finetune'):
     if task == 'finetune':
         checkpoint_model = torch.load(runner_config['pretrain_path'], map_location='cpu')
         state_dict = model.state_dict()
@@ -323,9 +323,9 @@ def train_vit(runner_config, model, train_loader, val_loader, task):
             bvp = bvp.to(device)
             pred = model(data)
             optimizer.zero_grad()
+            loss = lossfunc_ecg(bvp, pred)
             loss.backward()
             optimizer.step()
-            loss = lossfunc_ecg(bvp, pred)
             temp_tr_loss += loss.item()
         train_loss_list.append(temp_tr_loss / len(train_loader))
         for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(val_loader)):
@@ -355,7 +355,7 @@ def train_vit(runner_config, model, train_loader, val_loader, task):
     plt.legend()
     plt.savefig(f"{runner_config['log']}/loss.png")
 
-def test_vit(runner_config, model:nn.Module, test_loader, task):
+def test_vit(runner_config, model:nn.Module, test_loader):
     ckpt_path = f"{runner_config['model_saved_path']}/ckpt.pth"
     device = runner_config['device']
     model.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
@@ -366,15 +366,14 @@ def test_vit(runner_config, model:nn.Module, test_loader, task):
         for (batch_idx, (data, bvp, bpm, name)) in tqdm(enumerate(test_loader)):
             data = data.to(device)
             pred_bvp = model(data).cpu() # bz, 224 
-            bpm_list.append(bpm)
+            bpm_list.extend(bpm.cpu().tolist())
             pred_bvp_list.append(pred_bvp.cpu().numpy())
+            break
     
     pred_bvp_list = np.vstack(pred_bvp_list)
     # extract heart rate from bvp
     
-    hr_pred = [compute_metric_per_clip(_bvp) for _bvp in pred_bvp_list]
-    
-    MyEval(hr_pred, bpm_list)
+    hr_pred = [compute_metric_per_clip(pred_bvp_list[i, :]) for i in range(pred_bvp_list.shape[0])]
 
 
 def train_mae(runner_config, model, train_loader, val_loader):
