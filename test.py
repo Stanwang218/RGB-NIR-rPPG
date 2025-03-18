@@ -15,7 +15,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 sys.path.append('..')
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.model.model_disentangle import HR_disentangle_cross;
+# from utils.model.model_disentangle import HR_disentangle_cross;
 from utils.loss.loss_cross import Cross_loss;
 from utils.loss.loss_r import Neg_Pearson;
 from utils.loss.loss_SNR import SNR_loss;
@@ -34,6 +34,29 @@ from tqdm import tqdm
 from utils.model.models_vit import vit_base_patch16
 from utils.model.models_mae import mae_vit_base_patch16_dec512d8b
 import matplotlib.pyplot as plt
+
+def interpolate_pos_embed(model, checkpoint_model):
+    if 'pos_embed' in checkpoint_model:
+        pos_embed_checkpoint = checkpoint_model['pos_embed']
+        embedding_size = pos_embed_checkpoint.shape[-1]
+        num_patches = model.patch_embed.num_patches
+        num_extra_tokens = model.pos_embed.shape[-2] - num_patches
+        # height (== width) for the checkpoint position embedding
+        orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
+        # height (== width) for the new position embedding
+        new_size = int(num_patches ** 0.5)
+        # class_token and dist_token are kept unchanged
+        if orig_size != new_size:
+            print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
+            extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+            # only the position tokens are interpolated
+            pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
+            pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
+            pos_tokens = torch.nn.functional.interpolate(
+                pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
+            pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
+            new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+            checkpoint_model['pos_embed'] = new_pos_embed
 
 def _next_power_of_2(x):
     """Calculate the nearest power of 2."""
@@ -265,7 +288,19 @@ def test():
     print('Throughput:', len(test_dataset) * 224 / total_time, 'FPS')
 
 
-def train_vit(runner_config, model, train_loader, val_loader):
+def train_vit(runner_config, model, train_loader, val_loader, task):
+    if task == 'finetune':
+        checkpoint_model = torch.load(runner_config['pretrain_path'], map_location='cpu')
+        state_dict = model.state_dict()
+        for k in ['head.weight', 'head.bias']:
+            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+                print(f"Removing key {k} from pretrained checkpoint")
+                del checkpoint_model[k]
+        interpolate_pos_embed(model, checkpoint_model)
+
+        # load pre-trained model
+        msg = model.load_state_dict(checkpoint_model, strict=False)
+        
     epoch_num = runner_config['epochs']
     learning_rate = runner_config['lr']
     patience, cur_patience  = runner_config['patience'], 0
@@ -320,11 +355,11 @@ def train_vit(runner_config, model, train_loader, val_loader):
     plt.legend()
     plt.savefig(f"{runner_config['log']}/loss.png")
 
-def test_vit(runner_config, model:nn.Module, test_loader):
+def test_vit(runner_config, model:nn.Module, test_loader, task):
     ckpt_path = f"{runner_config['model_saved_path']}/ckpt.pth"
     device = runner_config['device']
+    model.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
     model = model.to(device)
-    model.load_state_dict(torch.load(ckpt_path))
     pred_bvp_list = []
     bpm_list = []
     with torch.no_grad():
@@ -332,7 +367,7 @@ def test_vit(runner_config, model:nn.Module, test_loader):
             data = data.to(device)
             pred_bvp = model(data).cpu() # bz, 224 
             bpm_list.append(bpm)
-            pred_bvp_list.append(bvp)
+            pred_bvp_list.append(pred_bvp.cpu().numpy())
     
     pred_bvp_list = np.vstack(pred_bvp_list)
     # extract heart rate from bvp
@@ -431,7 +466,7 @@ if __name__ == '__main__':
 
     train_loader = DataLoader(dataset=train_dataset, batch_size=runner_config['batch_size'],)
     test_loader = DataLoader(dataset=test_dataset, batch_size=runner_config['batch_size'],)
-    valid_loader = DataLoader(dataset=test_dataset, batch_size=runner_config['batch_size'],)
+    valid_loader = DataLoader(dataset=valid_dataset, batch_size=runner_config['batch_size'],)
     
     if model_config['name'] == 'vit':
         model = vit_base_patch16(in_chans = 3, num_classes = 224)
@@ -440,7 +475,7 @@ if __name__ == '__main__':
     elif model_config['name'] == 'mae':
         model = mae_vit_base_patch16_dec512d8b(in_chans=3, decoder_embed_dim=128, decoder_depth=8)
         train_mae(runner_config, model, train_loader, valid_loader)
-        test_vit(runner_config, model, test_loader)
+        test_mae(runner_config, model, test_loader)
     else:
         exit()
 

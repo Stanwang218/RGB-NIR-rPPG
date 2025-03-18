@@ -55,21 +55,21 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         return outcome
 
 
-def vit_base_patch16(**kwargs):
+def vit_base_patch16(pretrain = False, **kwargs):
     model = VisionTransformer(
         patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     
     # pretrained_model = timm.create_model('vit_base_patch16_224', pretrained=True)
+    if pretrain:
+        pretrained_dict = torch.load(os.path.join(os.getcwd(), 'ckpt', 'jx_vit_base.pth'))
+        model_dict = model.state_dict()
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
+        # print(pretrained_dict.keys())
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
 
-    pretrained_dict = torch.load(os.path.join(os.getcwd(), 'ckpt', 'jx_vit_base.pth'))
-    model_dict = model.state_dict()
-    pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
-    # print(pretrained_dict.keys())
-    model_dict.update(pretrained_dict)
-    model.load_state_dict(model_dict)
-
-    print("Load pretrained-ckpt from ImageNet")
+        print("Load pretrained-ckpt from ImageNet")
     return model
 
 
