@@ -17,4 +17,3 @@ exclude_list: [
 ]
 selected_topic: []
 step: 30
-map_type: [CHROM_POS_G]

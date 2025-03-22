@@ -130,9 +130,15 @@ def get_parser():
     parser = argparse.ArgumentParser('MAE fine-tuning for image classification', add_help=False)
     parser.add_argument("--dataset", required=False, default='/mae_rppg/train/fold1.yaml')
     parser.add_argument("--runner", required=False, default='/mae_rppg/train/fold1.yaml')
-    parser.add_argument("--model", required=False, default='/mae_rppg/train/fold1.yaml')
+    parser.add_argument("--model", required=True, default='mae', choices=['vit', 'mae'])
     parser.add_argument("--seed", type=int, default=7234)
+    parser.add_argument("--channels", type=int, default=3)
+    parser.add_argument("--name", type=str, default='vit', help='name of setting')
+    parser.add_argument("--ckpt_path", type=str, default=None, help='path of pretrained model')
     parser.add_argument("--selected_topics", nargs = '+', type=str, default=[])
+    parser.add_argument("--map_type", nargs = '+', type=str, default=['CHROM'], choices=['CHROM', 'POS', 'NIR', 'YUV', 'RGB', 'CHROM_POS_G'])
+    parser.add_argument("--task", type=str, default='ft')
+
     return parser
 
 def MyEval(HR_pr, HR_rel):
@@ -290,7 +296,9 @@ def test():
 
 def train_vit(runner_config, model, train_loader, val_loader, test_loader = None, task = 'finetune'):
     if task == 'finetune':
-        checkpoint_model = torch.load(runner_config['pretrain_path'], map_location='cpu')
+        if runner_config['ckpt_path'] is None or not os.path.exists(runner_config['ckpt_path']):
+            raise FileNotFoundError
+        checkpoint_model = torch.load(runner_config['ckpt_path'], map_location='cpu')
         state_dict = model.state_dict()
         for k in ['head.weight', 'head.bias']:
             if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
@@ -371,7 +379,7 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
             data = data.to(device)
             pred_bvp, hr = model(data).cpu() # bz, 224 
             bpm_list.extend(bpm.cpu().tolist())
-            hr_list.extend(hr.cpu().tolist())
+            hr_list.extend(hr.cpu().view(-1).tolist())
         MyEval(hr_list, bpm_list)
         
     plt.plot(train_loss_list, label='train')
@@ -380,7 +388,9 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
     plt.savefig(f"{runner_config['log']}/loss.png")
 
 def test_vit(runner_config, model:nn.Module, test_loader):
-    ckpt_path = f"{runner_config['model_saved_path']}/ckpt.pth"
+    ckpt_path = runner_config['ckpt_path']
+    if ckpt_path is None or not os.path.exists(ckpt_path):
+        raise FileNotFoundError
     device = runner_config['device']
     model.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
     model = model.to(device)
@@ -392,7 +402,7 @@ def test_vit(runner_config, model:nn.Module, test_loader):
             data = data.to(device)
             pred_bvp, hr = model(data).cpu() # bz, 224 
             bpm_list.extend(bpm.cpu().tolist())
-            hr_list.extend(hr.cpu().tolist())
+            hr_list.extend(hr.cpu().view(-1).tolist())
             pred_bvp_list.append(pred_bvp.cpu().numpy())
     
     pred_bvp_list = np.vstack(pred_bvp_list)
@@ -456,7 +466,9 @@ def train_mae(runner_config, model, train_loader, val_loader):
     plt.savefig(runner_config['log'])
     
 def test_mae(runner_config, model:nn.Module, test_loader):
-    ckpt_path = f"{runner_config['model_saved_path']}/ckpt.pth"
+    ckpt_path = runner_config['ckpt_path']
+    if ckpt_path is None or not os.path.exists(ckpt_path):
+        raise FileNotFoundError
     device = runner_config['device']
     model = model.to(device)
     model.load_state_dict(torch.load(ckpt_path))
@@ -476,20 +488,21 @@ if __name__ == '__main__':
     args = get_parser()
     args = args.parse_args()
     set_seed(args.seed)
-    f_dataset, f_runner, f_model = open(args.dataset), open(args.runner), open(args.model)
-    dataset_config, model_config, runner_config = yaml.safe_load(f_dataset), yaml.safe_load(f_model), yaml.safe_load(f_runner)
-
+    f_dataset, f_runner = open(args.dataset), open(args.runner)
+    dataset_config, runner_config = yaml.safe_load(f_dataset), yaml.safe_load(f_runner)
+    dataset_config['map_type'] = args.map_type
     dataset_config['selected_topic'] = args.selected_topics
-    print(dataset_config['selected_topic'])
-    saved_dir = os.path.join(runner_config['root'], runner_config['name'] + "_" + model_config['name'])
+    # print(dataset_config['selected_topic'])
+    saved_dir = os.path.join(runner_config['root'], args.name + "_" + args.model)
 
     if not os.path.exists(saved_dir):
         os.mkdir(saved_dir)
     runner_config['model_saved_path'] = os.path.join(saved_dir, 'ckpt')
     runner_config['log'] = saved_dir
+    runner_config['ckpt_path'] = args.ckpt_path
         
-    task = runner_config['task']
-    task_name = runner_config['name']
+    # task = runner_config['task']
+    # task_name = runner_config['name']
 
     train_dataset, test_dataset, valid_dataset = MSTmap_dataset_cut.split_dataset(config=dataset_config)
 
@@ -497,12 +510,12 @@ if __name__ == '__main__':
     test_loader = DataLoader(dataset=test_dataset, batch_size=runner_config['batch_size'],)
     valid_loader = DataLoader(dataset=valid_dataset, batch_size=runner_config['batch_size'],)
     
-    if model_config['name'] == 'vit':
-        model = vit_base_patch16(in_chans = model_config['channels'], num_classes = 224)
-        train_vit(runner_config, model, train_loader, valid_loader)
+    if args.model == 'vit':
+        model = vit_base_patch16(in_chans = args.channels, num_classes = 224)
+        train_vit(runner_config, model, train_loader, valid_loader, test_loader, args.task)
         test_vit(runner_config, model, test_loader)
-    elif model_config['name'] == 'mae':
-        model = mae_vit_base_patch16_dec512d8b(in_chans=model_config['channels'], decoder_embed_dim=128, decoder_depth=8)
+    elif args.model['name'] == 'mae':
+        model = mae_vit_base_patch16_dec512d8b(in_chans=args.channels, decoder_embed_dim=128, decoder_depth=8)
         train_mae(runner_config, model, train_loader, valid_loader)
         test_mae(runner_config, model, test_loader)
     else:

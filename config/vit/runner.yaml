@@ -1,13 +1,12 @@
 root: /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp
 device: 'cuda:0'
 task: "finetune" # finetune
-name: "fold_1"
 patience: 10
 batch_size: 64
 epochs: 20
 warm_epochs: 5
-lr: 0.001
+lr: 0.0001
 device: "cuda:0"
 weight_decay: 0.05
 layer_decay: 0.75
-pretrain_path: /Users/code/python/Reasearch/rPPG-MAE/RGB-NIR-rPPG/ckpt/ckpt.pth
+# pretrain_path: /Users/code/python/Reasearch/rPPG-MAE/RGB-NIR-rPPG/ckpt/ckpt.pth

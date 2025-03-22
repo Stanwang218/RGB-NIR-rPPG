@@ -316,3 +316,12 @@ def mae_vit_huge_patch14_dec512d8b(**kwargs):
 mae_vit_base_patch16 = mae_vit_base_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_large_patch16 = mae_vit_large_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_huge_patch14 = mae_vit_huge_patch14_dec512d8b  # decoder: 512 dim, 8 blocks
+
+
+# Test code
+# from torchinfo import summary
+# model = mae_vit_base_patch16_dec512d8b(in_chans=6, decoder_embed_dim=128, decoder_depth=8)
+# tensor = torch.randn((1,6, 224, 224))
+# loss, bvp, mask = model(tensor)
+# summary(model, input_size=(1, 6, 224, 224))
+# print(bvp.shape)

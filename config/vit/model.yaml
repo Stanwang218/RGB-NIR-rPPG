@@ -1,4 +1,0 @@
-name: "vit" # vit, mae, vit+mae
-channels: 3
-num_classes: 224
-pretrained_path:

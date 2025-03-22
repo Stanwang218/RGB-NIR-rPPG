@@ -13,7 +13,7 @@ apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin
   . /ext3/env.sh; \
   conda activate apple; \
   cd /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG; \
-  python ./test.py --dataset ./config/dataset/fold1.yaml --model ./config/mae/model.yaml --runner ./config/mae/runner.yaml \
+  python ./test.py --dataset ./config/dataset/fold1.yaml --runner ./config/mae/runner.yaml --model mae --name mae_fold1 --channels 3 --map_type NIR \
 "
 
 # apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
