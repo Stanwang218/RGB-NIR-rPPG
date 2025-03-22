@@ -288,7 +288,7 @@ def test():
     print('Throughput:', len(test_dataset) * 224 / total_time, 'FPS')
 
 
-def train_vit(runner_config, model, train_loader, val_loader, task = 'finetune'):
+def train_vit(runner_config, model, train_loader, val_loader, test_loader = None, task = 'finetune'):
     if task == 'finetune':
         checkpoint_model = torch.load(runner_config['pretrain_path'], map_location='cpu')
         state_dict = model.state_dict()
@@ -358,10 +358,22 @@ def train_vit(runner_config, model, train_loader, val_loader, task = 'finetune')
             cur_patience += 1
             
         val_loss_list.append(temp_val_loss / len(val_loader))
+        
         if cur_patience >= patience:
             print("no more patience, stop training")
             break
-    
+        if test_loader is None:
+            continue
+        
+        bpm_list = []
+        hr_list = []
+        for (batch_idx, (data, bvp, bpm, name)) in tqdm(enumerate(test_loader)):
+            data = data.to(device)
+            pred_bvp, hr = model(data).cpu() # bz, 224 
+            bpm_list.extend(bpm.cpu().tolist())
+            hr_list.extend(hr.cpu().tolist())
+        MyEval(hr_list, bpm_list)
+        
     plt.plot(train_loss_list, label='train')
     plt.plot(val_loss_list, label = 'val')
     plt.legend()
@@ -382,7 +394,6 @@ def test_vit(runner_config, model:nn.Module, test_loader):
             bpm_list.extend(bpm.cpu().tolist())
             hr_list.extend(hr.cpu().tolist())
             pred_bvp_list.append(pred_bvp.cpu().numpy())
-            break
     
     pred_bvp_list = np.vstack(pred_bvp_list)
     # extract heart rate from bvp
