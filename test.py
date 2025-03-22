@@ -300,6 +300,7 @@ def train_vit(runner_config, model, train_loader, val_loader, task = 'finetune')
 
         # load pre-trained model
         msg = model.load_state_dict(checkpoint_model, strict=False)
+        print(msg)
         
     epoch_num = runner_config['epochs']
     learning_rate = runner_config['lr']
@@ -312,6 +313,7 @@ def train_vit(runner_config, model, train_loader, val_loader, task = 'finetune')
     model.to(device)
     
     lossfunc_ecg = Neg_Pearson(downsample_mode = 0)
+    hr_mae = nn.L1Loss()
     
     train_loss_list, val_loss_list = [], []
     
@@ -320,10 +322,13 @@ def train_vit(runner_config, model, train_loader, val_loader, task = 'finetune')
         temp_tr_loss, temp_val_loss = 0, 0
         for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(train_loader)):
             data = data.to(device)
+            bpm = bpm.to(device)
             bvp = bvp.to(device)
-            pred = model(data)
+            pred, hr = model(data)
             optimizer.zero_grad()
-            loss = lossfunc_ecg(bvp, pred)
+            loss1 = lossfunc_ecg(bvp, pred)
+            loss2 = hr_mae(bpm, hr)
+            loss = loss1 + loss2 / loss2.item()
             loss.backward()
             optimizer.step()
             temp_tr_loss += loss.item()
@@ -331,8 +336,10 @@ def train_vit(runner_config, model, train_loader, val_loader, task = 'finetune')
         for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(val_loader)):
             data = data.to(device)
             bvp = bvp.to(device)
-            pred = model(data)
-            loss = lossfunc_ecg(bvp, pred)
+            pred, hr = model(data)
+            loss1 = lossfunc_ecg(bvp, pred)
+            loss2 = hr_mae(bpm, hr)
+            loss = loss1 + loss2 / loss2.item()
             temp_val_loss += loss.item()
         if min_val_loss > temp_val_loss:
             min_val_loss = temp_val_loss
@@ -362,11 +369,13 @@ def test_vit(runner_config, model:nn.Module, test_loader):
     model = model.to(device)
     pred_bvp_list = []
     bpm_list = []
+    hr_list = []
     with torch.no_grad():
         for (batch_idx, (data, bvp, bpm, name)) in tqdm(enumerate(test_loader)):
             data = data.to(device)
-            pred_bvp = model(data).cpu() # bz, 224 
+            pred_bvp, hr = model(data).cpu() # bz, 224 
             bpm_list.extend(bpm.cpu().tolist())
+            hr_list.extend(hr.cpu().tolist())
             pred_bvp_list.append(pred_bvp.cpu().numpy())
             break
     
@@ -374,8 +383,10 @@ def test_vit(runner_config, model:nn.Module, test_loader):
     # extract heart rate from bvp
     bpm_list = [int(_hr + 0.5) for _hr in bpm_list]
     hr_pred = [compute_metric_per_clip(pred_bvp_list[i, :]) for i in range(pred_bvp_list.shape[0])]
-    print(hr_pred)
-    print(bpm_list)
+    MyEval(hr_list, bpm_list)
+    print("HR directly from model: ", hr_list)
+    print("HR extracted from PPG: ", hr_pred)
+    print("Ground Truth: ", bpm_list)
     MyEval(hr_pred, bpm_list)
 
 

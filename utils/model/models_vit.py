@@ -26,6 +26,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         # self.cross_block = cross_Block(dim=kwargs['embed_dim'], num_heads=kwargs['num_heads'],
         #  mlp_ratio=kwargs['mlp_ratio'], qkv_bias=True, qk_scale=None, norm_layer=kwargs['norm_layer'])
         self.global_pool = global_pool
+        self.hr = nn.Linear(self.embed_dim, 1)
         if self.global_pool:
             norm_layer = kwargs['norm_layer']
             embed_dim = kwargs['embed_dim']
@@ -53,6 +54,12 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             outcome = x[:, 0]
 
         return outcome
+    
+    def forward(self, x):
+        x = self.forward_features(x)
+        ppg = self.head(x)
+        hr = self.hr(x)
+        return ppg, hr
 
 
 def vit_base_patch16(pretrain = False, **kwargs):
