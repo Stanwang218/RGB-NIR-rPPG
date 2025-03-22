@@ -6,7 +6,7 @@ patience: 50
 batch_size: 128
 epochs: 2000
 warm_epochs: 5
-lr: 1e-4
+lr: 0.0001
 device: "cuda:0"
 weight_decay: 0.05
 layer_decay: 0.75

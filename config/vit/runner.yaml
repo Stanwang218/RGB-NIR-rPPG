@@ -2,8 +2,8 @@ root: /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp
 device: 'cuda:0'
 task: "finetune" # finetune
 patience: 10
-batch_size: 64
-epochs: 20
+batch_size: 32
+epochs: 100
 warm_epochs: 5
 lr: 0.0001
 device: "cuda:0"

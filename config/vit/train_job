@@ -2,7 +2,7 @@
 #SBATCH -A NAISS2025-22-302 -p alvis
 #SBATCH -N 1 --gpus-per-node=A100:1
 #SBATCH -t 0-8:00:00
-#SBATCH -o "/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG/log/vit_baseline"
+#SBATCH -o "/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG/log/CPG_vit_baseline_fold1"
 
 echo "STARTING..."
 
@@ -13,7 +13,7 @@ apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin
   . /ext3/env.sh; \
   conda activate apple; \
   cd /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG; \
-  python ./test.py --dataset ./config/dataset/fold1.yaml --runner ./config/mae/runner.yaml --model vit --name vit_fold1 --channels 3 --map_type NIR --ckpt_path xxx \
+  python ./test.py --dataset ./config/dataset/fold1.yaml --runner ./config/vit/runner.yaml --model vit --name CPG_vit_fold1 --channels 6 --map_type CHROM_POS_G YUV --ckpt_path /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp/mae_fold1_CPG_mae/ckpt/ckpt.pth \
 "
 
 # apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \

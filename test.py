@@ -152,12 +152,12 @@ def MyEval(HR_pr, HR_rel):
     mer = np.mean(np.abs(temp) / HR_rel) * 100
     p = np.sum((HR_pr - np.mean(HR_pr))*(HR_rel - np.mean(HR_rel))) / (
                 0.01 + np.linalg.norm(HR_pr - np.mean(HR_pr), ord=2) * np.linalg.norm(HR_rel - np.mean(HR_rel), ord=2))
-    print('| me: %.4f' % me,
-          '| std: %.4f' % std,
-          '| mae: %.4f' % mae,
-          '| rmse: %.4f' % rmse,
-          '| mape: %.4f' % mer,
-          '| p: %.4f' % p
+    print('| me: %.2f' % me,
+          '| std: %.2f' % std,
+          '| mae: %.2f' % mae,
+          '| rmse: %.2f' % rmse,
+          '| mape: %.2f' % mer,
+          '| p: %.2f' % p
           )
     return me, std, mae, rmse, mer, p
 
@@ -313,17 +313,21 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
     epoch_num = runner_config['epochs']
     learning_rate = runner_config['lr']
     patience, cur_patience  = runner_config['patience'], 0
-
+    
     device = runner_config['device']
+    fps = torch.tensor([30]).to(device)
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(0.9, 0.95), weight_decay = 0.05)
     
     model.to(device)
     
     lossfunc_ecg = Neg_Pearson(downsample_mode = 0)
+    lossfunc_SNR = SNR_loss(224, loss_type = 7)
     hr_mae = nn.L1Loss()
     
-    lambda_hr = 0.1
+    lambda_hr = 1
+    lambda_snr = 10
+    lambda_ecg = 20
     
     train_loss_list, val_loss_list = [], []
     
@@ -338,7 +342,8 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
             optimizer.zero_grad()
             loss1 = lossfunc_ecg(bvp, pred)
             loss2 = hr_mae(hr.view(-1), bpm)
-            loss = loss1 + loss2 * lambda_hr
+            loss3 = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
+            loss = loss1 * lambda_ecg + loss2 * lambda_hr + loss3 * lambda_snr
             print(f"hr loss: {loss2}, Pearson loss : {loss1}")
             loss.backward()
             optimizer.step()
@@ -351,9 +356,10 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
             pred, hr = model(data)
             loss1 = lossfunc_ecg(bvp, pred)
             loss2 = hr_mae(hr.view(-1), bpm)
-            loss = loss1 + loss2 * lambda_hr
+            loss3 = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
+            loss = loss1 * lambda_ecg + loss2 * lambda_hr + loss3 * lambda_snr
             temp_val_loss += loss.item()
-            print(f"hr loss: {loss2}, Pearson loss : {loss1}")
+            print(f"hr loss: {loss2}, Pearson loss : {loss1}, snr loss: {loss3}")
         if min_val_loss > temp_val_loss:
             min_val_loss = temp_val_loss
             cur_patience = 0
@@ -377,7 +383,7 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
         hr_list = []
         for (batch_idx, (data, bvp, bpm, name)) in tqdm(enumerate(test_loader)):
             data = data.to(device)
-            pred_bvp, hr = model(data).cpu() # bz, 224 
+            pred_bvp, hr = model(data) # bz, 224 
             bpm_list.extend(bpm.cpu().tolist())
             hr_list.extend(hr.cpu().view(-1).tolist())
         MyEval(hr_list, bpm_list)
@@ -400,7 +406,7 @@ def test_vit(runner_config, model:nn.Module, test_loader):
     with torch.no_grad():
         for (batch_idx, (data, bvp, bpm, name)) in tqdm(enumerate(test_loader)):
             data = data.to(device)
-            pred_bvp, hr = model(data).cpu() # bz, 224 
+            pred_bvp, hr = model(data) # bz, 224 
             bpm_list.extend(bpm.cpu().tolist())
             hr_list.extend(hr.cpu().view(-1).tolist())
             pred_bvp_list.append(pred_bvp.cpu().numpy())
@@ -514,7 +520,7 @@ if __name__ == '__main__':
         model = vit_base_patch16(in_chans = args.channels, num_classes = 224)
         train_vit(runner_config, model, train_loader, valid_loader, test_loader, args.task)
         test_vit(runner_config, model, test_loader)
-    elif args.model['name'] == 'mae':
+    elif args.model == 'mae':
         model = mae_vit_base_patch16_dec512d8b(in_chans=args.channels, decoder_embed_dim=128, decoder_depth=8)
         train_mae(runner_config, model, train_loader, valid_loader)
         test_mae(runner_config, model, test_loader)
