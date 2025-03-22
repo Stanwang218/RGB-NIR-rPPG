@@ -315,6 +315,8 @@ def train_vit(runner_config, model, train_loader, val_loader, task = 'finetune')
     lossfunc_ecg = Neg_Pearson(downsample_mode = 0)
     hr_mae = nn.L1Loss()
     
+    lambda_hr = 0.1
+    
     train_loss_list, val_loss_list = [], []
     
     min_val_loss = torch.finfo(torch.float32).max
@@ -327,8 +329,9 @@ def train_vit(runner_config, model, train_loader, val_loader, task = 'finetune')
             pred, hr = model(data)
             optimizer.zero_grad()
             loss1 = lossfunc_ecg(bvp, pred)
-            loss2 = hr_mae(hr, bpm)
-            loss = loss1 + loss2 / loss2.item()
+            loss2 = hr_mae(hr.view(-1), bpm)
+            loss = loss1 + loss2 * lambda_hr
+            print(f"hr loss: {loss2}, Pearson loss : {loss1}")
             loss.backward()
             optimizer.step()
             temp_tr_loss += loss.item()
@@ -339,9 +342,10 @@ def train_vit(runner_config, model, train_loader, val_loader, task = 'finetune')
             bpm = bpm.view(-1).to(device)
             pred, hr = model(data)
             loss1 = lossfunc_ecg(bvp, pred)
-            loss2 = hr_mae(hr, bpm)
-            loss = loss1 + loss2 / loss2.item()
+            loss2 = hr_mae(hr.view(-1), bpm)
+            loss = loss1 + loss2 * lambda_hr
             temp_val_loss += loss.item()
+            print(f"hr loss: {loss2}, Pearson loss : {loss1}")
         if min_val_loss > temp_val_loss:
             min_val_loss = temp_val_loss
             cur_patience = 0
