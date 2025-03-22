@@ -411,7 +411,7 @@ def train_mae(runner_config, model, train_loader, val_loader):
             min_val_loss = temp_val_loss
             cur_patience = 0
             model_ckpt = model.state_dict()
-            print(f"best loss {min_val_loss}")
+            print(f"best loss {min_val_loss / len(val_loader)}")
             if not os.path.exists(runner_config['model_saved_path']):
                 os.mkdir(runner_config['model_saved_path'])
             torch.save(model_ckpt, f"{runner_config['model_saved_path']}/ckpt.pth")
@@ -441,7 +441,7 @@ def test_mae(runner_config, model:nn.Module, test_loader):
             bvp_map_list.append(bvp_map.cpu().numpy())
             break
     bvp_map_list = np.vstack(bvp_map_list)
-    np.save(f"{runner_config['model_saved_path']}/example.npy")
+    np.save(f"{runner_config['model_saved_path']}/example.npy", bvp_map_list)
             
 
 
@@ -471,11 +471,11 @@ if __name__ == '__main__':
     valid_loader = DataLoader(dataset=valid_dataset, batch_size=runner_config['batch_size'],)
     
     if model_config['name'] == 'vit':
-        model = vit_base_patch16(in_chans = 3, num_classes = 224)
+        model = vit_base_patch16(in_chans = model_config['channels'], num_classes = 224)
         train_vit(runner_config, model, train_loader, valid_loader)
         test_vit(runner_config, model, test_loader)
     elif model_config['name'] == 'mae':
-        model = mae_vit_base_patch16_dec512d8b(in_chans=3, decoder_embed_dim=128, decoder_depth=8)
+        model = mae_vit_base_patch16_dec512d8b(in_chans=model_config['channels'], decoder_embed_dim=128, decoder_depth=8)
         train_mae(runner_config, model, train_loader, valid_loader)
         test_mae(runner_config, model, test_loader)
     else:
