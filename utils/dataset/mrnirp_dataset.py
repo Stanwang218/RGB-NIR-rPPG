@@ -285,7 +285,7 @@ class MSTmap_dataset_cut(Dataset):
         # exit()
         return train_dataset, test_dataset, valid_dataset
     
-    def __init__(self, root, bvp_list = None, map_list=["CHROM", "POS"],  img_size = (224, 224)):
+    def __init__(self, root, bvp_list = None, map_list=["CHROM", "POS"],  img_size = (224, 224), pretrained = False):
         super().__init__()
         print(f"Using map {map_list}")
         self.h, self.w = img_size
@@ -293,6 +293,8 @@ class MSTmap_dataset_cut(Dataset):
         self.root = root
         self.bvp_path = os.path.join(root, 'bvp')
         self.maps = map_list
+        self.pretrained = pretrained
+        self.maps_type = ['CHROM', 'POS', 'YUV', 'RGB', 'NIR', 'CHROM_POS_G']
         if bvp_list is None:
             self.bvp_list = os.listdir(self.bvp_path)
         else:
@@ -323,14 +325,16 @@ class MSTmap_dataset_cut(Dataset):
         bvp = np.cumsum(np.load(label_path))
         bvp = (bvp - np.min(bvp)) / (np.max(bvp) - np.min(bvp))
         bvp = bvp.astype('float32')
-        
+        maps = []
+        if self.pretrained:
+            idx = np.random.choice(np.arange(0, len(self.maps_type)), size=2, replace=False)
+            maps = self.maps_type[idx]
+        else:
+            maps = self.maps
         map_name = self.bvp_list[index].replace('label', 'input').replace('npy', 'png')
-        # print(map_name)
-        # chrom_path, pos_path = os.path.join(self.chrom_path, map_name), os.path.join(self.pos_path, map_name)
-        
-        # print(chrom_path)
+
         map_list = []
-        for _map in self.maps:
+        for _map in maps:
             if _map == "CHROM":
                 chrom_path = os.path.join(self.chrom_path, map_name)
                 map_list.append(cv.imread(chrom_path))
