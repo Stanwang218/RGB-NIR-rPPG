@@ -138,6 +138,7 @@ def get_parser():
     parser.add_argument("--selected_topics", nargs = '+', type=str, default=[])
     parser.add_argument("--map_type", nargs = '+', type=str, default=['CHROM'], choices=['CHROM', 'POS', 'NIR', 'YUV', 'RGB', 'CHROM_POS_G'])
     parser.add_argument("--task", type=str, default='ft')
+    parser.add_argument("--pretrained", action='store_true')
 
     return parser
 
@@ -342,7 +343,7 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
             optimizer.zero_grad()
             loss1 = lossfunc_ecg(bvp, pred)
             loss2 = hr_mae(hr.view(-1), bpm)
-            loss3 = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
+            loss3, tmp = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
             loss = loss1 * lambda_ecg + loss2 * lambda_hr + loss3 * lambda_snr
             print(f"hr loss: {loss2}, Pearson loss : {loss1}")
             loss.backward()
@@ -356,7 +357,7 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
             pred, hr = model(data)
             loss1 = lossfunc_ecg(bvp, pred)
             loss2 = hr_mae(hr.view(-1), bpm)
-            loss3 = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
+            loss3, tmp = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
             loss = loss1 * lambda_ecg + loss2 * lambda_hr + loss3 * lambda_snr
             temp_val_loss += loss.item()
             print(f"hr loss: {loss2}, Pearson loss : {loss1}, snr loss: {loss3}")
@@ -510,7 +511,7 @@ if __name__ == '__main__':
     # task = runner_config['task']
     # task_name = runner_config['name']
 
-    train_dataset, test_dataset, valid_dataset = MSTmap_dataset_cut.split_dataset(config=dataset_config)
+    train_dataset, test_dataset, valid_dataset = MSTmap_dataset_cut.split_dataset(config=dataset_config, pretrained=args.pretrained)
 
     train_loader = DataLoader(dataset=train_dataset, batch_size=runner_config['batch_size'],)
     test_loader = DataLoader(dataset=test_dataset, batch_size=runner_config['batch_size'],)

@@ -3,9 +3,9 @@ device: 'cuda:0'
 task: "finetune" # finetune
 patience: 10
 batch_size: 32
-epochs: 100
+epochs: 200
 warm_epochs: 5
-lr: 0.0001
+lr: 0.00001
 device: "cuda:0"
 weight_decay: 0.05
 layer_decay: 0.75
