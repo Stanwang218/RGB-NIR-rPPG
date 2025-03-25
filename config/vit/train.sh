@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
 #SBATCH -A NAISS2025-22-302 -p alvis
 #SBATCH -N 1 --gpus-per-node=A100:1
-#SBATCH -t 0-8:00:00
-#SBATCH -o "/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG/log/CPG_vit_baseline_fold1"
+#SBATCH -t 0-12:00:00
+#SBATCH -o "/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG/log/nir_vit_snr_fold1_small_lr"
+# sbatch --array=1-5 ./config/vit/train.sh ./config/vit/train.txt
 
 echo "STARTING..."
 
-echo "-------------------------- FOLD 1 --------------------------"
+input_file=$1
+eval `head -n $SLURM_ARRAY_TASK_ID $input_file | tail -1`
 
+echo "-------------------------- $fold --------------------------"
+
+# name="CPG-snr-vit-$fold-lr"
+name="nir-snr-fold$fold-lr"
+ckpt_path="nir_fold${fold}_mae"
+model="vit"
+path=$(printf "%s_%s" "$name" "$model")
+
+echo "/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp/$path/ckpt/ckpt.pth"
 
 apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
   . /ext3/env.sh; \
   conda activate apple; \
   cd /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG; \
-  python ./test.py --dataset ./config/dataset/fold1.yaml --runner ./config/vit/runner.yaml --model vit --name CPG_vit_fold1 --channels 6 --map_type CHROM_POS_G YUV --ckpt_path /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp/mae_fold1_CPG_mae/ckpt/ckpt.pth \
+  python ./test.py --dataset ./config/dataset/fold1.yaml --runner ./config/vit/runner.yaml --model vit --name $name --channels 3 --map_type NIR --ckpt_path /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp/$ckpt_path/ckpt/ckpt.pth \
 "
 
 # apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \

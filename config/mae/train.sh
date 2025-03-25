@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 #SBATCH -A NAISS2025-22-302 -p alvis
 #SBATCH -N 1 --gpus-per-node=A100:1
-#SBATCH -t 0-8:00:00
-#SBATCH -o "/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG/log/mae_baseline"
+#SBATCH -t 0-12:00:00
+#SBATCH -o "/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG/log/mae_nir_baseline"
+# sbatch --array=1-5 ./config/mae/train.sh ./config/mae/train.txt
+
+input_file=$1
+eval `head -n $SLURM_ARRAY_TASK_ID $input_file | tail -1`
 
 echo "STARTING..."
 
-echo "-------------------------- FOLD 1 --------------------------"
+echo "-------------------------- fold=$fold --------------------------"
 
 
 apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
   . /ext3/env.sh; \
   conda activate apple; \
   cd /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG; \
-  python ./test.py --dataset ./config/dataset/fold1.yaml --runner ./config/mae/runner.yaml --model mae --name mae_fold1 --channels 3 --map_type NIR \
+  python ./test.py --dataset ./config/dataset/fold$fold.yaml --runner ./config/mae/runner.yaml --model mae --name nir_fold$fold --channels 6 --map_type NIR --pretrained \
 "
 
 # apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
