@@ -243,7 +243,7 @@ class MSTmap_dataset_cut(Dataset):
         return ast.literal_eval(s)
     
     @staticmethod
-    def split_dataset(config, img_size = (224, 224)):
+    def split_dataset(config, img_size = (224, 224), pretrained=False):
         train_subject = config['train_subject']
         test_subject = config['test_subject']
         valid_subject = config['valid_subject']
@@ -281,7 +281,7 @@ class MSTmap_dataset_cut(Dataset):
             
             
         train_dataset, test_dataset, valid_dataset = \
-                MSTmap_dataset_cut(dataset_path, train_bvp_list, map_type, img_size), MSTmap_dataset_cut(dataset_path, test_bvp_list, map_type, img_size), MSTmap_dataset_cut(dataset_path, valid_bvp_list, map_type, img_size)
+                MSTmap_dataset_cut(dataset_path, train_bvp_list, map_type, img_size, pretrained), MSTmap_dataset_cut(dataset_path, test_bvp_list, map_type, img_size, pretrained), MSTmap_dataset_cut(dataset_path, valid_bvp_list, map_type, img_size, pretrained)
         # exit()
         return train_dataset, test_dataset, valid_dataset
     
