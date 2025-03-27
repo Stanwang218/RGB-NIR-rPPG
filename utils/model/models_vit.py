@@ -57,9 +57,11 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         return outcome
     
     def forward(self, x):
-        x = F.relu(self.forward_features(x))
+        x = self.forward_features(x)
         ppg = self.head(x)
+        ppg_max, ppg_min = torch.max(ppg, dim=-1, keepdim=True)[0], torch.min(ppg, dim=-1, keepdim=True)[0]
         hr = self.hr(x)
+        ppg = (ppg - ppg_min) / (ppg_max - ppg_min)
         return ppg, hr
 
 class VisionTransformer_double(nn.Module):
