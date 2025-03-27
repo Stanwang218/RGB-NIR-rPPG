@@ -57,8 +57,8 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         return outcome
     
     def forward(self, x):
-        x = self.forward_features(x)
-        ppg = F.relu(self.head(x))
+        x = F.relu(self.forward_features(x))
+        ppg = self.head(x)
         hr = self.hr(x)
         return ppg, hr
 
