@@ -161,11 +161,11 @@ def vit_huge_patch14(**kwargs):
     return model
 
 # test code
-from torchinfo import summary
-# model = vit_base_patch16(in_chans=6, num_classes = 224)
-model = VisionTransformer_double()
-tensor = torch.randn((1,6, 224, 224))
-tensor_nir = torch.randn((1,3, 224, 224))
-ppg, hr = model(tensor, tensor_nir)
-# summary(model, input_size=(1, 6, 224, 224))
-print(ppg.shape)
+# from torchinfo import summary
+# # model = vit_base_patch16(in_chans=6, num_classes = 224)
+# model = VisionTransformer_double()
+# tensor = torch.randn((1,6, 224, 224))
+# tensor_nir = torch.randn((1,3, 224, 224))
+# ppg, hr = model(tensor, tensor_nir)
+# # summary(model, input_size=(1, 6, 224, 224))
+# print(ppg.shape)
