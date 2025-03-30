@@ -2,6 +2,7 @@ root: /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp
 device: 'cuda:0'
 task: "train"
 name: "fold_1"
+dataset: "cut_dataset"
 patience: 50
 batch_size: 128
 epochs: 2000

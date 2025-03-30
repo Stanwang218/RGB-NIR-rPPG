@@ -66,7 +66,7 @@ class driver_dataset(Dataset):
         return train_dataset, test_dataset, valid_dataset
         
     
-    def __init__(self, dict_list, img_size = 224, step = 10) -> None:
+    def __init__(self, dict_list, img_size = 224, step = 5) -> None:
         super().__init__()
         self.step = step
         self.img_size = img_size
@@ -113,110 +113,145 @@ class driver_dataset(Dataset):
 
 class MSTmap_dataset(Dataset):
     @staticmethod
-    def customized_collate_fn(batch):
-        batch = default_collate(batch)
-        batch[0] = batch[0].view(-1, 6, 224, 224)
-        batch[1] = batch[1].view(-1, 224)
-        batch[2] = batch[2].view(-1)
-        return batch
-        
-    
-    @staticmethod
     def str_to_list( s):
         return ast.literal_eval(s)
     
     @staticmethod
-    def split_dataset(config):
-        video_len = 900
-        img_size = 224
+    def split_dataset(config, img_size = (224, 224), pretrained=False):
         train_subject = config['train_subject']
         test_subject = config['test_subject']
         valid_subject = config['valid_subject']
+        exclude_list = config['exclude_list']
+        map_type = config['map_type']
+        selected_topics = config['selected_topic']
         dataset_path = config['path'] # label path
-        step = config['step']
+        # dataset_path = '/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/data/PreprocessedData/DataFileLists/MR-NIRP_final_raw_0.0_1.0.csv'
+        csv_file = pd.read_csv(os.path.join(dataset_path, 'old_data.csv'))
+        
         train_bvp_list, test_bvp_list, valid_bvp_list = [], [], []
         
         print(dataset_path)
-        bvp_list = [os.path.basename(i) for i in glob.glob(f"{dataset_path}/*label*.npy")]
+        bvp_list = csv_file['project_name'].tolist()
         
-        hr_column = [] # if the step changes
         for bvp_name in bvp_list:
             subject_name = os.path.basename(bvp_name).split('_')[0]
+            subject_full_name = os.path.basename(bvp_name).split('input')[0][:-1]
+            full_name_split_list = subject_full_name.split('_')[1:]
+            topic_name = "_".join(full_name_split_list)
+            if len(selected_topics) != 0:
+                if topic_name not in selected_topics:
+                    # print("filtering", subject_full_name)
+                    continue
+            # print(subject_full_name)
+            if subject_full_name in exclude_list:
+                # print("filtering", subject_full_name)
+                continue
             if subject_name in train_subject:
-                train_bvp_list.append(bvp_name)
-            elif subject_name in test_subject:
-                test_bvp_list.append(bvp_name)
-            else:
-                valid_bvp_list.append(bvp_name)
+                train_bvp_list.append(bvp_name + ".npy")
+            if subject_name in test_subject:
+                test_bvp_list.append(bvp_name + ".npy")
+            if subject_name in valid_subject:
+                valid_bvp_list.append(bvp_name+ ".npy")
             
             
         train_dataset, test_dataset, valid_dataset = \
-                MSTmap_dataset(train_bvp_list, label_path=dataset_path), MSTmap_dataset(test_bvp_list, label_path=dataset_path), MSTmap_dataset(valid_bvp_list, label_path=dataset_path)
+                MSTmap_dataset_cut(dataset_path, train_bvp_list, map_type, img_size, pretrained), MSTmap_dataset_cut(dataset_path, test_bvp_list, map_type, img_size, pretrained), MSTmap_dataset_cut(dataset_path, valid_bvp_list, map_type, img_size, pretrained)
+        # exit()
         return train_dataset, test_dataset, valid_dataset
     
-    def __init__(self, bvp_list = None, img_size = 224, label_path = None, pic_path = None):
+    def __init__(self, root, bvp_list = None, map_list=["CHROM", "POS"],  img_size = (224, 224), step = 5, pretrained = False):
         super().__init__()
-        self.img_size = img_size
-        self.bvp_path = label_path
-        if pic_path is None:
-            self.path = '/data/PreprocessedData/CHROM_POS'
-        else:
-            self.path = pic_path
+        print(f"Using map {map_list}")
+        self.h, self.t = img_size
+        # self.img_size = img_size
+        self.root = root
+        self.step = step
+        self.bvp_path = os.path.join(root, 'bvp')
+        self.maps = map_list
+        self.pretrained = pretrained
+        self.maps_type = ['CHROM', 'POS', 'YUV', 'RGB', 'NIR', 'CHROM_POS_G']
         if bvp_list is None:
             self.bvp_list = os.listdir(self.bvp_path)
         else:
             self.bvp_list = bvp_list
-        # f = open()
-        self.chrom_path = os.path.join(self.path, "CHROM")
-        self.pos_path = os.path.join(self.path, "POS")
+        self.bvp_len = self.bvp_list[0].shape[0]
+        
+        self.chrom_path = os.path.join(self.root, "CHROM")
+        self.pos_path = os.path.join(self.root, "POS")
+        self.yuv_path = os.path.join(self.root, "YUV")
+        self.rgb_path = os.path.join(self.root, "RGB")
+        self.nir_path = os.path.join(self.root, "NIR")
+        
         self.transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Resize((224,900)),
+            transforms.Resize((self.h,self.w)),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
         ])
-        hr_df = pd.read_csv('/data/PreprocessedData/raw/hr.csv')
-        self.dict = dict()
-        for i, row in hr_df.iterrows():
-            self.dict[row['label_path']] = row['heart_rate']
     
     def __len__(self):
         return len(self.bvp_list)
     
     def __getitem__(self, index):
-        # print(self.chrom_path)
         label_path = os.path.join(self.bvp_path, self.bvp_list[index])
         bvp = np.cumsum(np.load(label_path))
-        bvp = (bvp - np.min(bvp)) / (np.max(bvp) - np.min(bvp))
+        bvp = (bvp - np.min(bvp)) / (np.max(bvp) - np.min(bvp)) # standardization
         bvp = bvp.astype('float32')
-        subject_name = self.bvp_list[index].split('_')[0]
+        num_win = (self.bvp_len - self.t) // self.step + 1
+        win_idx = np.random.randint(0, num_win)
+        maps = []
+        if self.pretrained:
+            idx = np.random.choice(self.maps_type, size=(2), replace=False).tolist()
+            maps = idx
+        else:
+            maps = self.maps
         map_name = self.bvp_list[index].replace('label', 'input').replace('npy', 'png')
-        # print(map_name)
-        chrom_path, pos_path = os.path.join(self.chrom_path, map_name), os.path.join(self.pos_path, map_name)
-        # print(chrom_path)
-        feature_map1 = cv.imread(chrom_path)
-        feature_map2 = cv.imread(pos_path)
-        feature_map = np.concatenate((feature_map1, feature_map2), axis=2)
-        # print(feature_map.shape)
-        # print(bvp.shape)
-        for c in range(feature_map.shape[2]):
-            for r in range(feature_map.shape[0]):
-                feature_map[r, :, c] = 255 * ((feature_map[r, :, c] - np.min(feature_map[r, :, c])) \
-                        / (0.00001 + np.max(feature_map[r, :,c]) - np.min(feature_map[r, :, c])))
-            feature_map1 = Image.fromarray(np.uint8(feature_map[:,:,0:3]))
-            feature_map2 = Image.fromarray(np.uint8(feature_map[:,:,3:6]))
-        timestep = feature_map.shape[1]
-        num_slices = timestep // self.img_size  
-        # for i in range(num_slices):
+
+        map_list = []
+        for _map in maps:
+            if _map == "CHROM":
+                chrom_path = os.path.join(self.chrom_path, map_name)
+                map_list.append(cv.imread(chrom_path))
+            elif _map == "POS":
+                pos_path = os.path.join(self.pos_path, map_name)
+                map_list.append(cv.imread(pos_path))
+            elif _map == "YUV":
+                yuv_path = os.path.join(self.yuv_path, map_name)
+                map_list.append(cv.imread(yuv_path))
+            elif _map == "RGB":
+                rgb_path = os.path.join(self.rgb_path, map_name)
+                map_list.append(cv.imread(rgb_path))
+            elif _map == "NIR":
+                nir_path = os.path.join(self.nir_path, map_name)
+                map_list.append(cv.imread(nir_path))
+            elif _map == "CHROM_POS_G":
+                chrom_path = os.path.join(self.chrom_path, map_name)
+                pos_path = os.path.join(self.pos_path, map_name)
+                rgb_path = os.path.join(self.rgb_path, map_name)
+                map_list.extend([cv.imread(chrom_path)[:, :, 2, np.newaxis], cv.imread(pos_path)[:, :, 2, np.newaxis], cv.imread(rgb_path)[:, :, 1, np.newaxis]])
+
+
+        feature_map = np.concatenate(map_list, axis=2) # num_ROI, T, C
+        feature_map = feature_map[:, win_idx * self.t: (win_idx + 1) * self.t, :]
+        
+        min_vals = np.min(feature_map, axis=1, keepdims=True)  # shape: (H, 1, C)
+        max_vals = np.max(feature_map, axis=1, keepdims=True)  # shape: (H, 1, C)
+        feature_map = (feature_map - min_vals) / (0.00001 + max_vals - min_vals) * 255
+        
+        feature_map_list = []
+        for i in range(0, feature_map.shape[2], 3):
+            temp_feature_map = Image.fromarray(np.uint8(feature_map[:,:,i:i+3]))
+            feature_map_list.append(temp_feature_map)
+            
+        # feature_map1 = Image.fromarray(np.uint8(feature_map[:,:,0:3]))
+        # feature_map2 = Image.fromarray(np.uint8(feature_map[:,:,3:6]))
+
         if self.transform:
-                feature_map1 = self.transform(feature_map1)
-                feature_map2 = self.transform(feature_map2)
-                feature_map = np.concatenate((feature_map1, feature_map2), axis = 0)
-        hr = torch.tensor(self.str_to_list(self.dict[label_path]))
-        feature_map = feature_map[:, :, :num_slices * self.img_size].reshape(-1, self.img_size, self.img_size, num_slices)
-        feature_map = feature_map.transpose(3, 0, 1, 2)
-        bvp = bvp[: num_slices * self.img_size].reshape(num_slices, self.img_size)
-        return feature_map, bvp, hr
+            for i, feature_map in enumerate(feature_map_list):
+                feature_map_list[i] = self.transform(feature_map)
+
+            feature_map = np.concatenate(feature_map_list, axis = 0)
+        return feature_map, bvp, self.bvp_list[index,  win_idx * self.t: (win_idx + 1) * self.t]
         
 class MSTmap_dataset_cut(Dataset):
     @staticmethod
@@ -312,10 +347,6 @@ class MSTmap_dataset_cut(Dataset):
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
         ])
-        hr_df = pd.read_csv(os.path.join(self.root, 'old_data.csv'))
-        self.dict = dict()
-        for i, row in hr_df.iterrows():
-            self.dict[row['project_name']] = row['label']
     
     def __len__(self):
         return len(self.bvp_list)
@@ -323,7 +354,7 @@ class MSTmap_dataset_cut(Dataset):
     def __getitem__(self, index):
         label_path = os.path.join(self.bvp_path, self.bvp_list[index])
         bvp = np.cumsum(np.load(label_path))
-        bvp = (bvp - np.min(bvp)) / (np.max(bvp) - np.min(bvp))
+        bvp = (bvp - np.min(bvp)) / (np.max(bvp) - np.min(bvp)) # standardization
         bvp = bvp.astype('float32')
         maps = []
         if self.pretrained:
@@ -355,12 +386,10 @@ class MSTmap_dataset_cut(Dataset):
                 pos_path = os.path.join(self.pos_path, map_name)
                 rgb_path = os.path.join(self.rgb_path, map_name)
                 map_list.extend([cv.imread(chrom_path)[:, :, 2, np.newaxis], cv.imread(pos_path)[:, :, 2, np.newaxis], cv.imread(rgb_path)[:, :, 1, np.newaxis]])
-                
-        # feature_map1 = map_list[0]
-        # feature_map2 = map_list[1]
-        feature_map = np.concatenate(map_list, axis=2)
-        # print(feature_map.shape)
-        # print(bvp.shape)
+
+
+        feature_map = np.concatenate(map_list, axis=2) # num_ROI, T, C
+        
         min_vals = np.min(feature_map, axis=1, keepdims=True)  # shape: (H, 1, C)
         max_vals = np.max(feature_map, axis=1, keepdims=True)  # shape: (H, 1, C)
         feature_map = (feature_map - min_vals) / (0.00001 + max_vals - min_vals) * 255
@@ -380,8 +409,7 @@ class MSTmap_dataset_cut(Dataset):
         if self.transform:
             for i, feature_map in enumerate(feature_map_list):
                 feature_map_list[i] = self.transform(feature_map)
-            # feature_map1 = self.transform(feature_map1)
-            # feature_map2 = self.transform(feature_map2)
+
             feature_map = np.concatenate(feature_map_list, axis = 0)
         hr = torch.tensor(self.dict[os.path.basename(label_path)[:-4]]) 
         return feature_map, bvp, hr, self.bvp_list[index]

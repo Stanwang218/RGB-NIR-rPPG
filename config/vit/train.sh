@@ -2,7 +2,7 @@
 #SBATCH -A NAISS2025-22-302 -p alvis
 #SBATCH -N 1 --gpus-per-node=A100:1
 #SBATCH -t 0-12:00:00
-#SBATCH -o "/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG/log/nir_vit_snr_fold1_small_lr"
+#SBATCH -o "/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG/log/nir_vit_snr_fold4_hr"
 # sbatch --array=1-5 ./config/vit/train.sh ./config/vit/train.txt
 
 echo "STARTING..."
@@ -13,55 +13,32 @@ eval `head -n $SLURM_ARRAY_TASK_ID $input_file | tail -1`
 echo "-------------------------- $fold --------------------------"
 
 # name="CPG-snr-vit-$fold-lr"
-name="nir-snr-fold$fold-lr"
-ckpt_path="nir_fold${fold}_mae"
-model="vit"
-path=$(printf "%s_%s" "$name" "$model")
+
+name="nir-snr-fold$fold-ft"
+
+# name="full_nir-snr-fold$fold-ft"
+
+# ckpt_path="nir_fold${fold}_mae"
+ckpt_path=$(printf "mae_fold%s_mae" "$fold")
+
+# model="vit"
+# ckpt_path=$(printf "nir-snr-fold%s-ft_%s" "$fold" "$model")
+# path=$(printf "%s_%s" "$name" "$model")
 
 echo "/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp/$path/ckpt/ckpt.pth"
+
+echo $ckpt_path
 
 apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
   . /ext3/env.sh; \
   conda activate apple; \
   cd /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG; \
-  python ./test.py --dataset ./config/dataset/fold1.yaml --runner ./config/vit/runner.yaml --model vit --name $name --channels 3 --map_type NIR --ckpt_path /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp/$ckpt_path/ckpt/ckpt.pth \
+  python ./test.py --dataset ./config/dataset/fold$fold.yaml --dataset_path /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/data/PreprocessedData/MSTMap_new --runner ./config/vit/runner.yaml --model vit --name $name --channels 6 --map_type NIR NIR --ckpt_path /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp/$ckpt_path/ckpt/ckpt.pth --task finetune \
 "
 
-# apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
-#   . /ext3/env.sh; \
-#   conda activate apple; \
-#   python /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/postprocess.py; \
-# "
-
-# echo "-------------------------- FOLD 2 --------------------------"
-
-# apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
-#   . /ext3/env.sh; \
-#   conda activate apple; \
-#   python /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/eccv_model/test.py --config_file '/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/eccv_model/train/CHROMYUV/fold2.yaml' \
-# "
-
-# echo "-------------------------- FOLD 3 --------------------------"
-
-# apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
-#   . /ext3/env.sh; \
-#   conda activate apple; \
-#   python /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/eccv_model/test.py --config_file '/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/eccv_model/train/CHROMYUV/fold3.yaml' \
-# "
-
-# echo "-------------------------- FOLD 4 --------------------------"
-
-# apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
-#   . /ext3/env.sh; \
-#   conda activate apple; \
-#   python /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/eccv_model/test.py --config_file '/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/eccv_model/train/CHROMYUV/fold4.yaml' \
-# "
-
-# echo "-------------------------- FOLD 5 --------------------------"
-
-# apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
-#   . /ext3/env.sh; \
-#   conda activate apple; \
-#   python /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/eccv_model/test.py --config_file '/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/eccv_model/train/CHROMYUV/fold5.yaml' \
-# "
-# echo "COMPLETED"
+apptainer exec /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/apple.sif /bin/bash -c " \
+  . /ext3/env.sh; \
+  conda activate apple; \
+  cd /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/RGB-NIR-rPPG; \
+  python ./test.py --dataset ./config/dataset/fold$fold.yaml --dataset_path /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/data/PreprocessedData/CHROM_POS --dataset_type full --runner ./config/vit/runner.yaml --model vit --name $name --channels 6 --map_type NIR NIR --ckpt_path /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/mae_rppg/new_exp/$ckpt_path/ckpt/ckpt.pth --task finetune \
+"

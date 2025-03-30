@@ -22,7 +22,7 @@ from utils.loss.loss_SNR import SNR_loss;
 from tqdm import tqdm
 import argparse
 import yaml
-from utils.dataset.mrnirp_dataset import MSTmap_dataset_cut
+from utils.dataset.mrnirp_dataset import MSTmap_dataset_cut, MSTmap_dataset
 # from utils.dataset.pure_dataset import MSTmap_PURE_cut
 from utils.dataset.sig_util import compute_metric_per_clip
 import numpy as np
@@ -129,6 +129,8 @@ def set_seed(seed):
 def get_parser():
     parser = argparse.ArgumentParser('MAE fine-tuning for image classification', add_help=False)
     parser.add_argument("--dataset", required=False, default='/mae_rppg/train/fold1.yaml')
+    parser.add_argument("--dataset_type", required=False, default='cut_dataset')
+    parser.add_argument("--dataset_path", required=True, default='/mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/data/PreprocessedData/MSTMap_new')
     parser.add_argument("--runner", required=False, default='/mae_rppg/train/fold1.yaml')
     parser.add_argument("--model", required=True, default='mae', choices=['vit', 'mae'])
     parser.add_argument("--seed", type=int, default=7234)
@@ -417,7 +419,7 @@ def test_vit(runner_config, model:nn.Module, test_loader):
             pred_bvp_list.append(pred_bvp.cpu().numpy())
             gt_bvp_list.append(bvp.cpu().numpy())
             
-    for snr, hr in zip(pred_bvp, hr_list):
+    for snr, hr in zip(pred_bvp_list, hr_list):
         snr_list.append(_calculate_SNR(snr, hr))
     print(f"snr:{np.array(snr_list).mean()}")
     pred_bvp_list = np.vstack(pred_bvp_list)
@@ -510,6 +512,7 @@ if __name__ == '__main__':
     set_seed(args.seed)
     f_dataset, f_runner = open(args.dataset), open(args.runner)
     dataset_config, runner_config = yaml.safe_load(f_dataset), yaml.safe_load(f_runner)
+    dataset_config['path'] = args.dataset_path
     dataset_config['map_type'] = args.map_type
     dataset_config['selected_topic'] = args.selected_topics
     # print(dataset_config['selected_topic'])
@@ -524,8 +527,12 @@ if __name__ == '__main__':
     # task = runner_config['task']
     # task_name = runner_config['name']
 
-    train_dataset, test_dataset, valid_dataset = MSTmap_dataset_cut.split_dataset(config=dataset_config, pretrained=args.pretrained)
-
+    if args.dataset_type == 'cut_dataset':
+        train_dataset, test_dataset, valid_dataset = MSTmap_dataset_cut.split_dataset(config=dataset_config, pretrained=args.pretrained)
+    else:
+        train_dataset, test_dataset, valid_dataset = MSTmap_dataset.split_dataset(config=dataset_config, pretrained=args.pretrained)
+                
+    
     train_loader = DataLoader(dataset=train_dataset, batch_size=runner_config['batch_size'],)
     test_loader = DataLoader(dataset=test_dataset, batch_size=runner_config['batch_size'],)
     valid_loader = DataLoader(dataset=valid_dataset, batch_size=runner_config['batch_size'],)
