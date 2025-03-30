@@ -155,7 +155,7 @@ class MSTmap_dataset(Dataset):
             
             
         train_dataset, test_dataset, valid_dataset = \
-                MSTmap_dataset_cut(dataset_path, train_bvp_list, map_type, img_size, pretrained), MSTmap_dataset_cut(dataset_path, test_bvp_list, map_type, img_size, pretrained), MSTmap_dataset_cut(dataset_path, valid_bvp_list, map_type, img_size, pretrained)
+                MSTmap_dataset(dataset_path, train_bvp_list, map_type, img_size, pretrained), MSTmap_dataset(dataset_path, test_bvp_list, map_type, img_size, pretrained), MSTmap_dataset(dataset_path, valid_bvp_list, map_type, img_size, pretrained)
         # exit()
         return train_dataset, test_dataset, valid_dataset
     
