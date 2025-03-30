@@ -251,7 +251,7 @@ class MSTmap_dataset(Dataset):
                 feature_map_list[i] = self.transform(feature_map)
 
             feature_map = np.concatenate(feature_map_list, axis = 0)
-        return feature_map, bvp, self.bvp_list[index,  win_idx * self.t: (win_idx + 1) * self.t]
+        return feature_map, bvp, 0, self.bvp_list[index,  win_idx * self.t: (win_idx + 1) * self.t] # return fake hr for alignment
         
 class MSTmap_dataset_cut(Dataset):
     @staticmethod
