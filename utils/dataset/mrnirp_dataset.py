@@ -174,7 +174,7 @@ class MSTmap_dataset(Dataset):
             self.bvp_list = os.listdir(self.bvp_path)
         else:
             self.bvp_list = bvp_list
-        self.bvp_len = np.load(self.bvp_list[0]).shape[0]
+        self.bvp_len = np.load(os.path.join(self.bvp_path, self.bvp_list[0])).shape[0]
         
         self.chrom_path = os.path.join(self.root, "CHROM")
         self.pos_path = os.path.join(self.root, "POS")
