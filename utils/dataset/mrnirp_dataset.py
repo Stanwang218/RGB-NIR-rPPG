@@ -232,7 +232,7 @@ class MSTmap_dataset(Dataset):
 
 
         feature_map = np.concatenate(map_list, axis=2) # num_ROI, T, C
-        feature_map = feature_map[:, win_idx * self.t: (win_idx + 1) * self.t, :]
+        feature_map = feature_map[:, self.step * win_idx : self.step * win_idx + self.t, :]
         
         min_vals = np.min(feature_map, axis=1, keepdims=True)  # shape: (H, 1, C)
         max_vals = np.max(feature_map, axis=1, keepdims=True)  # shape: (H, 1, C)
@@ -251,7 +251,7 @@ class MSTmap_dataset(Dataset):
                 feature_map_list[i] = self.transform(feature_map)
 
             feature_map = np.concatenate(feature_map_list, axis = 0)
-        return feature_map, bvp, 0, self.bvp_list[index,  win_idx * self.t: (win_idx + 1) * self.t] # return fake hr for alignment
+        return feature_map, bvp, 0, self.bvp_list[index][self.step * win_idx : self.step * win_idx + self.t] # return fake hr for alignment
         
 class MSTmap_dataset_cut(Dataset):
     @staticmethod
