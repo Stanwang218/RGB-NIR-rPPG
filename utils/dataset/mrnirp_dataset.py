@@ -300,8 +300,6 @@ class MSTmap_dataset_cut(Dataset):
         else:
             self.bvp_list = bvp_list
             
-        self.idx = np.vstack([np.random.choice(self.maps_type, size=(1, 2), replace=False) for i in range(len(self.bvp_list))]).tolist()
-        # f = open()
         self.chrom_path = os.path.join(self.root, "CHROM")
         self.pos_path = os.path.join(self.root, "POS")
         self.yuv_path = os.path.join(self.root, "YUV")
@@ -329,7 +327,8 @@ class MSTmap_dataset_cut(Dataset):
         bvp = bvp.astype('float32')
         maps = []
         if self.pretrained:
-            maps = self.idx[index]
+            idx = np.random.choice(self.maps_type, size=(2), replace=False).tolist()
+            maps = idx
         else:
             maps = self.maps
         map_name = self.bvp_list[index].replace('label', 'input').replace('npy', 'png')
@@ -364,7 +363,7 @@ class MSTmap_dataset_cut(Dataset):
         # print(bvp.shape)
         min_vals = np.min(feature_map, axis=1, keepdims=True)  # shape: (H, 1, C)
         max_vals = np.max(feature_map, axis=1, keepdims=True)  # shape: (H, 1, C)
-        feature_map = 255 * (feature_map - min_vals) / (0.00001 + max_vals - min_vals)
+        feature_map = (feature_map - min_vals) / (0.00001 + max_vals - min_vals) * 255
         # for c in range(feature_map.shape[2]):
         #     for r in range(feature_map.shape[0]):
         #         feature_map[r, :, c] = 255 * ((feature_map[r, :, c] - np.min(feature_map[r, :, c])) \

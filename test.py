@@ -139,6 +139,7 @@ def get_parser():
     parser.add_argument("--map_type", nargs = '+', type=str, default=['CHROM'], choices=['CHROM', 'POS', 'NIR', 'YUV', 'RGB', 'CHROM_POS_G'])
     parser.add_argument("--task", type=str, default='ft')
     parser.add_argument("--pretrained", action='store_true')
+    parser.add_argument("--test", action='store_true')
 
     return parser
 
@@ -345,7 +346,7 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
             loss2 = hr_mae(hr.view(-1), bpm)
             loss3, tmp = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
             loss = loss1 * lambda_ecg + loss2 * lambda_hr + loss3 * lambda_snr
-            print(f"hr loss: {loss2}, Pearson loss : {loss1}")
+            print(f"hr loss: {loss2 * lambda_hr}, Pearson loss : {loss1}")
             loss.backward()
             optimizer.step()
             temp_tr_loss += loss.item()
@@ -360,7 +361,7 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
             loss3, tmp = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
             loss = loss1 * lambda_ecg + loss2 * lambda_hr + loss3 * lambda_snr
             temp_val_loss += loss.item()
-            print(f"hr loss: {loss2}, Pearson loss : {loss1}, snr loss: {loss3}")
+            print(f"hr loss: {loss2 * lambda_hr}, Pearson loss : {loss1}, snr loss: {loss3}")
         if min_val_loss > temp_val_loss:
             min_val_loss = temp_val_loss
             cur_patience = 0
@@ -393,6 +394,7 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
     plt.plot(val_loss_list, label = 'val')
     plt.legend()
     plt.savefig(f"{runner_config['log']}/loss.png")
+    runner_config['ckpt_path'] = f"{runner_config['model_saved_path']}/ckpt.pth"
 
 def test_vit(runner_config, model:nn.Module, test_loader):
     ckpt_path = runner_config['ckpt_path']
@@ -402,8 +404,10 @@ def test_vit(runner_config, model:nn.Module, test_loader):
     model.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
     model = model.to(device)
     pred_bvp_list = []
+    gt_bvp_list = []
     bpm_list = []
     hr_list = []
+    snr_list = []
     with torch.no_grad():
         for (batch_idx, (data, bvp, bpm, name)) in tqdm(enumerate(test_loader)):
             data = data.to(device)
@@ -411,15 +415,23 @@ def test_vit(runner_config, model:nn.Module, test_loader):
             bpm_list.extend(bpm.cpu().tolist())
             hr_list.extend(hr.cpu().view(-1).tolist())
             pred_bvp_list.append(pred_bvp.cpu().numpy())
-    
+            gt_bvp_list.append(bvp.cpu().numpy())
+            
+    for snr, hr in zip(pred_bvp, hr_list):
+        snr_list.append(_calculate_SNR(snr, hr))
+    print(f"snr:{np.array(snr_list).mean()}")
     pred_bvp_list = np.vstack(pred_bvp_list)
     # extract heart rate from bvp
     bpm_list = [int(_hr + 0.5) for _hr in bpm_list]
     hr_pred = [compute_metric_per_clip(pred_bvp_list[i, :]) for i in range(pred_bvp_list.shape[0])]
+    max_value, min_value = np.max(pred_bvp_list, axis=1, keepdims=True), np.min(pred_bvp_list, axis=1, keepdims=True)
+    pred_bvp_list = (pred_bvp_list - min_value) / (max_value - min_value)
     MyEval(hr_list, bpm_list)
     print("HR directly from model: ", hr_list)
     print("HR extracted from PPG: ", hr_pred)
     print("Ground Truth: ", bpm_list)
+    np.save(os.path.join(runner_config['log'], 'bvp.npy'), pred_bvp_list)
+    np.save(os.path.join(runner_config['log'], 'gh_bvp.npy'), gt_bvp_list)
     MyEval(hr_pred, bpm_list)
 
 
@@ -470,7 +482,8 @@ def train_mae(runner_config, model, train_loader, val_loader):
     plt.plot(train_loss_list, label='train')
     plt.plot(val_loss_list, label = 'val')
     plt.legend()
-    plt.savefig(runner_config['log'])
+    plt.savefig(f"{runner_config['log']}/loss.png")
+    runner_config['ckpt_path'] = f"{runner_config['model_saved_path']}/ckpt.pth"
     
 def test_mae(runner_config, model:nn.Module, test_loader):
     ckpt_path = runner_config['ckpt_path']
@@ -519,11 +532,13 @@ if __name__ == '__main__':
     
     if args.model == 'vit':
         model = vit_base_patch16(in_chans = args.channels, num_classes = 224)
-        train_vit(runner_config, model, train_loader, valid_loader, test_loader, args.task)
+        if not args.test:
+            train_vit(runner_config, model, train_loader, valid_loader, test_loader, args.task)
         test_vit(runner_config, model, test_loader)
     elif args.model == 'mae':
         model = mae_vit_base_patch16_dec512d8b(in_chans=args.channels, decoder_embed_dim=128, decoder_depth=8)
-        train_mae(runner_config, model, train_loader, valid_loader)
+        if not args.test:
+            train_mae(runner_config, model, train_loader, valid_loader)
         test_mae(runner_config, model, test_loader)
     else:
         exit()
