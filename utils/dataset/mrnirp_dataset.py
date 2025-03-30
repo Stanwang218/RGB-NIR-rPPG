@@ -184,7 +184,7 @@ class MSTmap_dataset(Dataset):
         
         self.transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Resize((self.h,self.w)),
+            transforms.Resize((self.h,self.t)),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
         ])
