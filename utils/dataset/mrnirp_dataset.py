@@ -155,7 +155,7 @@ class MSTmap_dataset(Dataset):
             
             
         train_dataset, test_dataset, valid_dataset = \
-                MSTmap_dataset(dataset_path, train_bvp_list, map_type, img_size, pretrained), MSTmap_dataset(dataset_path, test_bvp_list, map_type, img_size, pretrained), MSTmap_dataset(dataset_path, valid_bvp_list, map_type, img_size, pretrained)
+                MSTmap_dataset(dataset_path, train_bvp_list, map_type, img_size, pretrained = pretrained), MSTmap_dataset(dataset_path, test_bvp_list, map_type, img_size, pretrained = pretrained), MSTmap_dataset(dataset_path, valid_bvp_list, map_type, img_size, pretrained = pretrained)
         # exit()
         return train_dataset, test_dataset, valid_dataset
     
@@ -194,14 +194,15 @@ class MSTmap_dataset(Dataset):
     
     def __getitem__(self, index):
         label_path = os.path.join(self.bvp_path, self.bvp_list[index])
-        bvp = np.cumsum(np.load(label_path))
-        bvp = (bvp - np.min(bvp)) / (np.max(bvp) - np.min(bvp)) # standardization
-        bvp = bvp.astype('float32')
         num_win = (self.bvp_len - self.t) // self.step + 1
         win_idx = np.random.randint(0, num_win)
+        bvp = np.cumsum(np.load(label_path))
+        bvp = bvp[self.step * win_idx : self.step * win_idx + self.t]
+        bvp = (bvp - np.min(bvp)) / (np.max(bvp) - np.min(bvp)) # standardization
+        bvp = bvp.astype('float32')
         maps = []
         if self.pretrained:
-            idx = np.random.choice(self.maps_type, size=(2), replace=False).tolist()
+            idx = np.random.choice(self.maps_type, size=(2), replace=True).tolist()
             maps = idx
         else:
             maps = self.maps
@@ -251,7 +252,7 @@ class MSTmap_dataset(Dataset):
                 feature_map_list[i] = self.transform(feature_map)
 
             feature_map = np.concatenate(feature_map_list, axis = 0)
-        return feature_map, bvp, 0, self.bvp_list[index][self.step * win_idx : self.step * win_idx + self.t] # return fake hr for alignment
+        return feature_map, bvp, 0, self.bvp_list[index] # return fake hr for alignment
         
 class MSTmap_dataset_cut(Dataset):
     @staticmethod
@@ -347,6 +348,10 @@ class MSTmap_dataset_cut(Dataset):
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
         ])
+        hr_df = pd.read_csv(os.path.join(self.root, 'old_data.csv'))
+        self.dict = dict()
+        for i, row in hr_df.iterrows():
+            self.dict[row['project_name']] = row['label']
     
     def __len__(self):
         return len(self.bvp_list)
