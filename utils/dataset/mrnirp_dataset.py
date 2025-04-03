@@ -175,7 +175,8 @@ class MSTmap_dataset(Dataset):
         else:
             self.bvp_list = bvp_list
         self.bvp_len = np.load(os.path.join(self.bvp_path, self.bvp_list[0])).shape[0]
-        
+        self.len_per_pic = (self.bvp_len - self.t) // self.step + 1
+        self.len = self.len_per_pic * len(self.bvp_list)
         self.chrom_path = os.path.join(self.root, "CHROM")
         self.pos_path = os.path.join(self.root, "POS")
         self.yuv_path = os.path.join(self.root, "YUV")
@@ -190,14 +191,17 @@ class MSTmap_dataset(Dataset):
         ])
     
     def __len__(self):
-        return len(self.bvp_list)
+        return self.len
     
     def __getitem__(self, index):
-        label_path = os.path.join(self.bvp_path, self.bvp_list[index])
-        num_win = (self.bvp_len - self.t) // self.step + 1
-        win_idx = np.random.randint(0, num_win)
+        segment_idx = index // self.len_per_pic
+        segment_offset = index % self.len_per_pic
+        label_path = os.path.join(self.bvp_path, self.bvp_list[segment_idx])
+        
+        # num_win = (self.bvp_len - self.t) // self.step + 1
+        # win_idx = np.random.randint(0, num_win)
         bvp = np.cumsum(np.load(label_path))
-        bvp = bvp[self.step * win_idx : self.step * win_idx + self.t]
+        bvp = bvp[self.step * segment_offset : self.step * segment_offset + self.t]
         bvp = (bvp - np.min(bvp)) / (np.max(bvp) - np.min(bvp)) # standardization
         bvp = bvp.astype('float32')
         maps = []
@@ -206,7 +210,7 @@ class MSTmap_dataset(Dataset):
             maps = idx
         else:
             maps = self.maps
-        map_name = self.bvp_list[index].replace('label', 'input').replace('npy', 'png')
+        map_name = self.bvp_list[segment_idx].replace('label', 'input').replace('npy', 'png')
 
         map_list = []
         for _map in maps:
@@ -233,7 +237,7 @@ class MSTmap_dataset(Dataset):
 
 
         feature_map = np.concatenate(map_list, axis=2) # num_ROI, T, C
-        feature_map = feature_map[:, self.step * win_idx : self.step * win_idx + self.t, :]
+        feature_map = feature_map[:, self.step * segment_offset : self.step * segment_offset + self.t, :]
         
         min_vals = np.min(feature_map, axis=1, keepdims=True)  # shape: (H, 1, C)
         max_vals = np.max(feature_map, axis=1, keepdims=True)  # shape: (H, 1, C)
@@ -252,7 +256,7 @@ class MSTmap_dataset(Dataset):
                 feature_map_list[i] = self.transform(feature_map)
 
             feature_map = np.concatenate(feature_map_list, axis = 0)
-        return feature_map, bvp, 0, self.bvp_list[index] # return fake hr for alignment
+        return feature_map, bvp, 0, self.bvp_list[segment_idx] # return fake hr for alignment
         
 class MSTmap_dataset_cut(Dataset):
     @staticmethod
