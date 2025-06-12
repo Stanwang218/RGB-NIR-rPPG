@@ -35,6 +35,100 @@ from utils.model.models_vit import vit_base_patch16
 from utils.model.models_mae import mae_vit_base_patch16_dec512d8b
 import matplotlib.pyplot as plt
 
+class P_loss3(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, gt_lable, pre_lable):
+        gt_lable, pre_lable = gt_lable.unsqueeze(1), pre_lable.unsqueeze(1)
+        M, N, A = gt_lable.shape
+        gt_lable = gt_lable - torch.mean(gt_lable, dim=2).view(M, N, 1)
+        pre_lable = pre_lable - torch.mean(pre_lable, dim=2).view(M, N, 1)
+        aPow = torch.sqrt(torch.sum(torch.mul(gt_lable, gt_lable), dim=2))
+        bPow = torch.sqrt(torch.sum(torch.mul(pre_lable, pre_lable), dim=2))
+        pearson = torch.sum(torch.mul(gt_lable, pre_lable), dim=2) / (aPow * bPow + 0.01)
+        loss = 1 - torch.sum(torch.sum(pearson, dim=1), dim=0)/(gt_lable.shape[0] * gt_lable.shape[1])
+        return loss
+
+class SP_loss(nn.Module):
+    def __init__(self, device, low_bound=40, high_bound=150,clip_length=224, use_wave=False):
+        super(SP_loss, self).__init__()
+
+        self.clip_length = clip_length
+        self.time_length = clip_length
+        self.device = device
+        self.delta_distribution = [0.4, 0.25, 0.05]
+        self.low_bound = low_bound
+        self.high_bound = high_bound
+
+        self.bpm_range = torch.arange(self.low_bound, self.high_bound, dtype = torch.float).to(self.device)
+        self.bpm_range = self.bpm_range / 60.0
+
+        self.pi = 3.14159265
+        two_pi_n = Variable(2 * self.pi * torch.arange(0, self.time_length, dtype=torch.float))
+        hanning = Variable(torch.from_numpy(np.hanning(self.time_length)).type(torch.FloatTensor), requires_grad=True).view(1, -1)
+
+        self.two_pi_n = two_pi_n.to(self.device)
+        self.hanning = hanning.to(self.device)
+
+        self.cross_entropy = nn.CrossEntropyLoss()
+        self.nll = nn.NLLLoss()
+        self.l1 = nn.L1Loss()
+
+        self.eps = 0.0001
+
+        self.lambda_l1 = 0.1
+        self.use_wave = use_wave
+
+    def forward(self, wave_pr, gt, pred = None, flag = None):  # all variable operation
+        # pred: heart rate per frame
+        # pred * fps => heart rate per second
+        # pred * fps * 60 => heart rate per minute
+        # wave_pr : bz, 224
+        # gt: heart rate: bz, 224
+        wave_pr = wave_pr.unsqueeze(dim=1)
+        fps = 30
+
+        hr = gt.clone() 
+
+        hr[hr.ge(self.high_bound)] = self.high_bound-1 # preprocess
+        hr[hr.le(self.low_bound)] = self.low_bound
+
+        if pred is not None:
+            pred = torch.mul(pred, fps)
+            pred = pred * 60 / self.clip_length
+
+        batch_size = wave_pr.shape[0]
+
+        f_t = self.bpm_range / fps # frequency for per frame
+        preds = wave_pr * self.hanning # hanning window for PPG, decrease spectral leakage
+       
+        preds = preds.view(batch_size, 1, -1) # B, 1, 224
+        f_t = f_t.repeat(batch_size, 1).view(batch_size, -1, 1)#[B,110,1]
+
+        tmp = self.two_pi_n.repeat(batch_size, 1)
+        tmp = tmp.view(batch_size, 1, -1) # B, 1, 224
+
+        # f_t * tmp = B, 110, 224
+        
+        # f_t * tmp = omega
+        
+        # f_t*tmp: B, 110, 224
+        # preds: B, 1, 224
+        complex_absolute = torch.sum(preds * torch.sin(f_t*tmp), dim=-1) ** 2 \
+                           + torch.sum(preds * torch.cos(f_t*tmp), dim=-1) ** 2 #[B ,110]
+        # spectral amplitude
+        
+        whole_max_val, whole_max_idx = complex_absolute.max(1)
+        whole_max_idx = whole_max_idx + self.low_bound
+        
+        target = hr - self.low_bound
+        target = target.type(torch.long).view(batch_size)
+
+        loss = self.cross_entropy(complex_absolute, target)
+
+
+        return loss, whole_max_idx
+
 def interpolate_pos_embed(model, checkpoint_model):
     if 'pos_embed' in checkpoint_model:
         pos_embed_checkpoint = checkpoint_model['pos_embed']
@@ -299,7 +393,7 @@ def test():
 
 
 def train_vit(runner_config, model, train_loader, val_loader, test_loader = None, task = 'finetune'):
-    if task == 'finetune':
+    if task == 'finetune' or task == 'linear_probe':
         if runner_config['ckpt_path'] is None or not os.path.exists(runner_config['ckpt_path']):
             raise FileNotFoundError
         checkpoint_model = torch.load(runner_config['ckpt_path'], map_location='cpu')
@@ -313,6 +407,11 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
         # load pre-trained model
         msg = model.load_state_dict(checkpoint_model, strict=False)
         print(msg)
+        if task == 'linear_probe':
+            print("Start freezing parameters")
+            for name, param in model.named_parameters():
+                if 'head' not in name:
+                    param.requires_grad = False
         
     epoch_num = runner_config['epochs']
     learning_rate = runner_config['lr']
@@ -325,78 +424,88 @@ def train_vit(runner_config, model, train_loader, val_loader, test_loader = None
     
     model.to(device)
     
-    lossfunc_ecg = Neg_Pearson(downsample_mode = 0)
-    lossfunc_SNR = SNR_loss(224, loss_type = 7)
+    # lossfunc_ecg = Neg_Pearson(downsample_mode = 0)
+    lossfunc_ecg = P_loss3().to(device)
+    # lossfunc_SNR = SNR_loss(224, loss_type = 7)
+    lossfunc_SNR = SP_loss(device).to(device)
     hr_mae = nn.L1Loss()
     
     lambda_hr = 1
-    lambda_snr = 10
+    lambda_snr = 0
     lambda_ecg = 20
     
     train_loss_list, val_loss_list = [], []
     
     min_val_loss = torch.finfo(torch.float32).max
     for epoch in tqdm(range(epoch_num)):
+        model.train()
         temp_tr_loss, temp_val_loss = 0, 0
         for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(train_loader)):
             data = data.to(device)
             bpm = bpm.view(-1).to(device)
+            # print(bvp.shape)
             bvp = bvp.to(device)
             pred, hr = model(data)
             optimizer.zero_grad()
             loss1 = lossfunc_ecg(bvp, pred)
             loss2 = hr_mae(hr.view(-1), bpm)
-            loss3, tmp = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
+            loss3, tmp = lossfunc_SNR(pred, bpm)
+            # loss3, tmp = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
             loss = loss1 * lambda_ecg + loss2 * lambda_hr + loss3 * lambda_snr
-            print(f"hr loss: {loss2 * lambda_hr}, Pearson loss : {loss1}")
+            print(f"hr loss: {loss2 * lambda_hr}, Pearson loss : {loss1}, snr loss: {loss3 * lambda_snr}")
             loss.backward()
+            # print(f"Gradient: {model.head.weight.grad.norm().item()}")
             optimizer.step()
             temp_tr_loss += loss.item()
         train_loss_list.append(temp_tr_loss / len(train_loader))
-        for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(val_loader)):
-            data = data.to(device)
-            bvp = bvp.to(device)
-            bpm = bpm.view(-1).to(device)
-            pred, hr = model(data)
-            loss1 = lossfunc_ecg(bvp, pred)
-            loss2 = hr_mae(hr.view(-1), bpm)
-            loss3, tmp = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
-            loss = loss1 * lambda_ecg + loss2 * lambda_hr + loss3 * lambda_snr
-            temp_val_loss += loss.item()
-            print(f"hr loss: {loss2 * lambda_hr}, Pearson loss : {loss1}, snr loss: {loss3}")
-        if min_val_loss > temp_val_loss:
-            min_val_loss = temp_val_loss
-            cur_patience = 0
-            model_ckpt = model.state_dict()
-            print(f"best loss {min_val_loss / len(val_loader)}")
-            if not os.path.exists(runner_config['model_saved_path']):
-                os.mkdir(runner_config['model_saved_path'])
-            torch.save(model_ckpt, f"{runner_config['model_saved_path']}/ckpt.pth")
-        else:
-            cur_patience += 1
+        model.eval()
+        with torch.no_grad():
+            for batch_idx, (data, bvp, bpm, name) in tqdm(enumerate(val_loader)):
+                data = data.to(device)
+                bvp = bvp.to(device)
+                bpm = bpm.view(-1).to(device)
+                pred, hr = model(data)
+                loss1 = lossfunc_ecg(bvp, pred)
+                loss2 = hr_mae(hr.view(-1), bpm)
+                loss3, tmp = lossfunc_SNR(pred, bpm)
+                # loss3, tmp = lossfunc_SNR(pred, bpm, fps, pred = hr, flag = None)
+                loss = loss1 * lambda_ecg + loss2 * lambda_hr + loss3 * lambda_snr
+                temp_val_loss += loss.item()
+                print(f"hr loss: {loss2 * lambda_hr}, Pearson loss : {loss1}, snr loss: {loss3 * lambda_snr}")
+            if min_val_loss > temp_val_loss:
+                min_val_loss = temp_val_loss
+                cur_patience = 0
+                model_ckpt = model.state_dict()
+                print(f"best loss {min_val_loss / len(val_loader)}")
+                if not os.path.exists(runner_config['model_saved_path']):
+                    os.mkdir(runner_config['model_saved_path'])
+                torch.save(model_ckpt, f"{runner_config['model_saved_path']}/ckpt.pth")
+            else:
+                cur_patience += 1
+                
+            val_loss_list.append(temp_val_loss / len(val_loader))
             
-        val_loss_list.append(temp_val_loss / len(val_loader))
-        
-        if cur_patience >= patience:
-            print("no more patience, stop training")
-            break
-        if test_loader is None:
-            continue
-        
-        bpm_list = []
-        hr_list = []
-        for (batch_idx, (data, bvp, bpm, name)) in tqdm(enumerate(test_loader)):
-            data = data.to(device)
-            pred_bvp, hr = model(data) # bz, 224 
-            bpm_list.extend(bpm.cpu().tolist())
-            hr_list.extend(hr.cpu().view(-1).tolist())
-        MyEval(hr_list, bpm_list)
+            if cur_patience >= patience:
+                print("no more patience, stop training")
+                break
+            if test_loader is None:
+                continue
+            
+            bpm_list = []
+            hr_list = []
+            for (batch_idx, (data, bvp, bpm, name)) in tqdm(enumerate(test_loader)):
+                data = data.to(device)
+                pred_bvp, hr = model(data) # bz, 224 
+                bpm_list.extend(bpm.cpu().tolist())
+                hr_list.extend(hr.cpu().view(-1).tolist())
+            MyEval(hr_list, bpm_list)
         
     plt.plot(train_loss_list, label='train')
     plt.plot(val_loss_list, label = 'val')
     plt.legend()
     plt.savefig(f"{runner_config['log']}/loss.png")
     runner_config['ckpt_path'] = f"{runner_config['model_saved_path']}/ckpt.pth"
+    print(runner_config['ckpt_path'])
 
 def test_vit(runner_config, model:nn.Module, test_loader):
     ckpt_path = runner_config['ckpt_path']
@@ -421,19 +530,25 @@ def test_vit(runner_config, model:nn.Module, test_loader):
             
     for snr, hr in zip(pred_bvp_list, hr_list):
         snr_list.append(_calculate_SNR(snr, hr))
-    print(f"snr:{np.array(snr_list).mean()}")
     pred_bvp_list = np.vstack(pred_bvp_list)
+    gt_bvp_list = np.vstack(gt_bvp_list)
     # extract heart rate from bvp
     bpm_list = [int(_hr + 0.5) for _hr in bpm_list]
     hr_pred = [compute_metric_per_clip(pred_bvp_list[i, :]) for i in range(pred_bvp_list.shape[0])]
-    max_value, min_value = np.max(pred_bvp_list, axis=1, keepdims=True), np.min(pred_bvp_list, axis=1, keepdims=True)
-    pred_bvp_list = (pred_bvp_list - min_value) / (max_value - min_value)
+    
+    # max_value, min_value = np.max(pred_bvp_list, axis=1, keepdims=True), np.min(pred_bvp_list, axis=1, keepdims=True)
+    # pred_bvp_list = (pred_bvp_list - min_value) / (max_value - min_value)
+    
+    mean_value, std_value = np.mean(pred_bvp_list, axis=1, keepdims=True), np.std(pred_bvp_list, axis=1, keepdims=True)
+    pred_bvp_list = (pred_bvp_list - mean_value) / (std_value)
+    
     MyEval(hr_list, bpm_list)
     print("HR directly from model: ", hr_list)
     print("HR extracted from PPG: ", hr_pred)
     print("Ground Truth: ", bpm_list)
     np.save(os.path.join(runner_config['log'], 'bvp.npy'), pred_bvp_list)
     np.save(os.path.join(runner_config['log'], 'gh_bvp.npy'), gt_bvp_list)
+    print(f"snr:{np.array(snr_list).mean()}")
     MyEval(hr_pred, bpm_list)
 
 
@@ -531,8 +646,6 @@ if __name__ == '__main__':
         train_dataset, test_dataset, valid_dataset = MSTmap_dataset_cut.split_dataset(config=dataset_config, pretrained=args.pretrained)
     else:
         train_dataset, test_dataset, valid_dataset = MSTmap_dataset.split_dataset(config=dataset_config, pretrained=args.pretrained)
-                
-    
     train_loader = DataLoader(dataset=train_dataset, batch_size=runner_config['batch_size'],)
     test_loader = DataLoader(dataset=test_dataset, batch_size=runner_config['batch_size'],)
     valid_loader = DataLoader(dataset=valid_dataset, batch_size=runner_config['batch_size'],)
