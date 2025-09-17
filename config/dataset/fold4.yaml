@@ -1,0 +1,15 @@
+path: /mimer/NOBACKUP/groups/naiss2024-23-123/ZiyuanWang/data/PreprocessedData/MSTMap_new
+train_subject: ['subject1', 'subject2', 'subject3', 'subject4', 'subject5', 'subject13', 'subject14', 'subject15', 'subject16', 'subject17', 'subject18', 'subject19']
+valid_subject: ['subject6', 'subject7', 'subject8']
+test_subject: ['subject9', 'subject10', 'subject11']
+exclude_list: [
+    'subject7_driving_small_motion_975',
+
+    'subject7_driving_still_975',
+
+    'subject2_garage_small_motion_940', 'subject6_garage_small_motion_975',
+
+    'subject5_garage_still_975', 'subject6_garage_still_975',
+]
+selected_topic: []
+step: 30

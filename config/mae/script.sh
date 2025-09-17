@@ -1,0 +1,1 @@
+python ./test.py --dataset ./config/dataset/fold1.yaml --runner ./config/mae/runner.yaml --model mae --name mae_fold1 --channels 3 --map_type NIR
