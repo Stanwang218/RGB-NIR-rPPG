@@ -28,4 +28,8 @@ python test_double.py --config_file /RGB-NIR-rPPG/config/fold1.yaml [--selected_
 
 This is the example for RGB-STMap
 
-<img src = "./fig/subject1_driving_large_motion_975_input0.png" ></img>
+<img src = "fig/subject1_driving_large_motion_975_input0.png" ></img>
+
+5. New configuration files are updated
+
+We uploaded the training configuration files in `/config/toolbox_config`, which can be runned by using toolbox. 
