@@ -1,9 +1,9 @@
 # RGB-NIR-rPPG
 
 ## Instructions
-1. Download the <a href = "https://computationalimaging.rice.edu/mr-nirp-dataset/">MR-NIRP </a>.
+1. Download the <a href="https://computationalimaging.rice.edu/mr-nirp-dataset/">MR-NIRP </a>.
 
-2. Clone the repo of <a href = "https://github.com/ubicomplab/rPPG-Toolbox">rPPG-Toolbox</a> and put dataset/BaseLoader.py and MRNIRPLoader.py under the dataset/data_loader. Process the raw data
+2. Clone the repo of <a href="https://github.com/ubicomplab/rPPG-Toolbox">rPPG-Toolbox</a> and put dataset/BaseLoader.py and MRNIRPLoader.py under the dataset/data_loader. Process the raw data
 
 ```
 python main.py --config_file /RGB-NIR-rPPG/config/MR-NIRP.yaml
@@ -28,7 +28,7 @@ python test_double.py --config_file /RGB-NIR-rPPG/config/fold1.yaml [--selected_
 
 This is the example for RGB-STMap
 
-<img src = "fig/subject1_driving_large_motion_975_input0.png" ></img>
+<img src="fig/subject1_driving_large_motion_975_input0.png"></img>
 
 5. New configuration files are updated
 
